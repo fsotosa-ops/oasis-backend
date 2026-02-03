@@ -20,7 +20,7 @@ NC='\033[0m'
 echo -e "${GREEN}🚀 Iniciando configuración completa para: $PROJECT_ID${NC}"
 
 # 1. CREACIÓN Y SELECCIÓN DEL PROYECTO
-echo -e "\n${YELLOW}[1/5] Verificando proyecto...${NC}"
+echo -e "\n${YELLOW}[1/6] Verificando proyecto...${NC}"
 if gcloud projects describe "$PROJECT_ID" &>/dev/null; then
     echo "✅ El proyecto $PROJECT_ID ya existe."
 else
@@ -33,7 +33,7 @@ echo "Seteando proyecto activo en gcloud..."
 gcloud config set project "$PROJECT_ID"
 
 # 2. VINCULACIÓN DE FACTURACIÓN (BILLING)
-echo -e "\n${YELLOW}[2/5] Verificando facturación...${NC}"
+echo -e "\n${YELLOW}[2/6] Verificando facturación...${NC}"
 BILLING_ENABLED=$(gcloud beta billing projects describe "$PROJECT_ID" --format="value(billingEnabled)")
 
 if [ "$BILLING_ENABLED" != "true" ]; then
@@ -56,7 +56,7 @@ else
 fi
 
 # 3. HABILITAR APIS
-echo -e "\n${YELLOW}[3/5] Habilitando APIs (esto puede tardar unos minutos)...${NC}"
+echo -e "\n${YELLOW}[3/6] Habilitando APIs (esto puede tardar unos minutos)...${NC}"
 gcloud services enable \
     run.googleapis.com \
     artifactregistry.googleapis.com \
@@ -66,7 +66,7 @@ gcloud services enable \
     iam.googleapis.com
 
 # 4. CREAR REPOSITORIO DE ARTIFACT REGISTRY
-echo -e "\n${YELLOW}[4/5] Configurando Artifact Registry...${NC}"
+echo -e "\n${YELLOW}[4/6] Configurando Artifact Registry...${NC}"
 REPO_NAME="oasis-api"
 if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$REGION" &>/dev/null; then
     gcloud artifacts repositories create "$REPO_NAME" \
@@ -78,8 +78,38 @@ else
     echo "✅ El repositorio ya existe."
 fi
 
-# 5. CONFIGURAR WORKLOAD IDENTITY FEDERATION (WIF)
-echo -e "\n${YELLOW}[5/5] Configurando Seguridad (WIF & Service Account)...${NC}"
+# 5. CREAR SECRETOS EN SECRET MANAGER
+echo -e "\n${YELLOW}[5/6] Creando secretos en Secret Manager...${NC}"
+
+ENV_FILE=".env"
+if [ ! -f "$ENV_FILE" ]; then
+    echo -e "${RED}❌ No se encontró archivo .env. Crea uno con las variables de Supabase.${NC}"
+    exit 1
+fi
+
+SECRETS=("SUPABASE_URL" "SUPABASE_ANON_KEY" "SUPABASE_SERVICE_ROLE_KEY" "SUPABASE_JWKS_URL")
+
+for SECRET_NAME in "${SECRETS[@]}"; do
+    SECRET_VALUE=$(grep "^${SECRET_NAME}=" "$ENV_FILE" | cut -d'=' -f2-)
+
+    if [ -z "$SECRET_VALUE" ]; then
+        echo -e "${RED}⚠️  $SECRET_NAME no encontrada en .env, saltando.${NC}"
+        continue
+    fi
+
+    if ! gcloud secrets describe "$SECRET_NAME" &>/dev/null; then
+        printf "%s" "$SECRET_VALUE" | gcloud secrets create "$SECRET_NAME" \
+            --data-file=- \
+            --replication-policy="automatic"
+        echo "✅ Secreto $SECRET_NAME creado."
+    else
+        printf "%s" "$SECRET_VALUE" | gcloud secrets versions add "$SECRET_NAME" --data-file=-
+        echo "✅ Secreto $SECRET_NAME actualizado (nueva versión)."
+    fi
+done
+
+# 6. CONFIGURAR WORKLOAD IDENTITY FEDERATION (WIF)
+echo -e "\n${YELLOW}[6/6] Configurando Seguridad (WIF & Service Account)...${NC}"
 SA_NAME="cloudrun-deployer"
 POOL_NAME="github-pool"
 PROVIDER_NAME="github-provider"
