@@ -111,17 +111,23 @@ done
 # 6. CONFIGURAR WORKLOAD IDENTITY FEDERATION (WIF)
 echo -e "\n${YELLOW}[6/6] Configurando Seguridad (WIF & Service Account)...${NC}"
 SA_NAME="cloudrun-deployer"
+RUNTIME_SA_NAME="cloudrun-runtime"
 POOL_NAME="github-pool"
 PROVIDER_NAME="github-provider"
 
-# Crear Service Account
+# Crear Service Account para deploy (GitHub Actions)
 if ! gcloud iam service-accounts describe "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" &>/dev/null; then
     gcloud iam service-accounts create "$SA_NAME" --display-name="GitHub Actions Deployer"
 fi
 
-# Asignar roles
+# Crear Service Account para runtime (Cloud Run)
+if ! gcloud iam service-accounts describe "${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" &>/dev/null; then
+    gcloud iam service-accounts create "$RUNTIME_SA_NAME" --display-name="Cloud Run Runtime"
+fi
+
+# Asignar roles al deployer
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-ROLES=("roles/run.admin" "roles/artifactregistry.writer" "roles/secretmanager.secretAccessor" "roles/iam.serviceAccountUser")
+ROLES=("roles/run.admin" "roles/artifactregistry.writer" "roles/iam.serviceAccountUser")
 
 for ROLE in "${ROLES[@]}"; do
     gcloud projects add-iam-policy-binding "$PROJECT_ID" \
@@ -129,6 +135,13 @@ for ROLE in "${ROLES[@]}"; do
         --role="$ROLE" \
         --condition=None --quiet >/dev/null
 done
+
+# Asignar roles al runtime SA (acceso a secretos)
+RUNTIME_SA_EMAIL="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$RUNTIME_SA_EMAIL" \
+    --role="roles/secretmanager.secretAccessor" \
+    --condition=None --quiet >/dev/null
 
 # Crear Pool y Provider
 if ! gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" &>/dev/null; then
@@ -163,4 +176,8 @@ echo -e "GCP_PROJECT_ID:                 ${GREEN}$PROJECT_ID${NC}"
 echo -e "GCP_REGION:                     ${GREEN}$REGION${NC}"
 echo -e "GCP_SERVICE_ACCOUNT:            ${GREEN}$SA_EMAIL${NC}"
 echo -e "GCP_WORKLOAD_IDENTITY_PROVIDER: ${GREEN}$PROVIDER_FULL_NAME${NC}"
+echo "------------------------------------------------------------------------"
+echo ""
+echo "Cloud Run runtime service account:"
+echo -e "  ${GREEN}$RUNTIME_SA_EMAIL${NC}"
 echo "------------------------------------------------------------------------"
