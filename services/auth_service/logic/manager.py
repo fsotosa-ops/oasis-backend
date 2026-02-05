@@ -76,6 +76,34 @@ class AuthManager:
         await client.auth.sign_out()
 
     @staticmethod
+    async def get_user_memberships(token: str, user_id: str) -> list[dict]:
+        """Obtiene las membresías de organizaciones del usuario."""
+        client = await get_scoped_client(token)
+        response = (
+            await client.table("organization_members")
+            .select(
+                "id, organization_id, role, status, joined_at, "
+                "organizations(name, slug)"
+            )
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .execute()
+        )
+        memberships = []
+        for row in (response.data or []):
+            org = row.get("organizations") or {}
+            memberships.append({
+                "id": row["id"],
+                "organization_id": row["organization_id"],
+                "role": row["role"],
+                "status": row["status"],
+                "joined_at": row.get("joined_at"),
+                "organization_name": org.get("name"),
+                "organization_slug": org.get("slug"),
+            })
+        return memberships
+
+    @staticmethod
     async def get_my_profile(token: str, user_id: str) -> dict:
         """Consulta la tabla profiles via scoped client (respeta RLS)."""
         client = await get_scoped_client(token)
@@ -86,7 +114,9 @@ class AuthManager:
             .single()
             .execute()
         )
-        return response.data
+        profile = response.data
+        profile["organizations"] = await AuthManager.get_user_memberships(token, user_id)
+        return profile
 
     @staticmethod
     async def update_my_profile(token: str, data: dict) -> dict:

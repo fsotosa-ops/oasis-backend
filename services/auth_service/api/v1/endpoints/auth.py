@@ -21,13 +21,13 @@ async def register(user: UserRegister):
     session = await AuthManager.register(user)
     if not session:
         return {"message": "Registro exitoso. Revisa tu email para confirmar."}
-    return _build_response(session)
+    return await _build_response(session)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(creds: UserLogin):
     session = await AuthManager.login(creds.email, creds.password)
-    return _build_response(session)
+    return await _build_response(session)
 
 
 @router.get("/login/oauth", response_model=OAuthUrlResponse)
@@ -43,14 +43,14 @@ async def login_oauth(
 async def oauth_callback(code: str = Query(..., description="Auth code from Supabase redirect")):
     """Intercambia el code de OAuth por access_token + refresh_token."""
     session = await AuthManager.exchange_code_for_session(code)
-    return _build_response(session)
+    return await _build_response(session)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(data: RefreshTokenRequest):
     """Intercambia un refresh_token por un nuevo par de tokens."""
     session = await AuthManager.refresh_session(data.refresh_token)
-    return _build_response(session)
+    return await _build_response(session)
 
 
 @router.post("/logout", status_code=204)
@@ -76,8 +76,11 @@ async def update_password(
     return {"message": "Password actualizado exitosamente."}
 
 
-def _build_response(session) -> dict:
+async def _build_response(session) -> dict:
     user = session.user
+    memberships = await AuthManager.get_user_memberships(
+        session.access_token, str(user.id)
+    )
     return TokenResponse(
         access_token=session.access_token,
         refresh_token=session.refresh_token,
@@ -89,5 +92,6 @@ def _build_response(session) -> dict:
             is_platform_admin=user.user_metadata.get("is_platform_admin", False),
             created_at=user.created_at,
             updated_at=user.updated_at,
+            organizations=memberships,
         ),
     ).model_dump()

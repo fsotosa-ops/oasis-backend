@@ -75,6 +75,16 @@ class RefreshTokenRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Auth response schemas
 # ---------------------------------------------------------------------------
+class OrgMembership(BaseModel):
+    id: str
+    organization_id: str
+    role: MemberRole
+    status: MembershipStatus
+    joined_at: Optional[datetime] = None
+    organization_name: Optional[str] = None
+    organization_slug: Optional[str] = None
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -84,6 +94,7 @@ class UserResponse(BaseModel):
     status: AccountStatus = AccountStatus.active
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    organizations: list[OrgMembership] = []
 
 
 class TokenResponse(BaseModel):
@@ -163,13 +174,3 @@ class MemberResponse(BaseModel):
     invited_by: Optional[str] = None
     invited_at: Optional[datetime] = None
     joined_at: Optional[datetime] = None
-
-
-class OrgMembership(BaseModel):
-    id: str
-    organization_id: str
-    role: MemberRole
-    status: MembershipStatus
-    joined_at: Optional[datetime] = None
-    organization_name: Optional[str] = None
-    organization_slug: Optional[str] = None
