@@ -63,6 +63,19 @@ class AuthManager:
         return res.session
 
     @staticmethod
+    async def refresh_session(refresh_token: str):
+        """Intercambia un refresh_token por una nueva sesión."""
+        client = await get_public_client()
+        res = await client.auth.refresh_session(refresh_token)
+        return res.session
+
+    @staticmethod
+    async def logout(token: str):
+        """Revoca la sesión del usuario."""
+        client = await get_scoped_client(token)
+        await client.auth.sign_out()
+
+    @staticmethod
     async def get_my_profile(token: str, user_id: str) -> dict:
         """Consulta la tabla profiles via scoped client (respeta RLS)."""
         client = await get_scoped_client(token)

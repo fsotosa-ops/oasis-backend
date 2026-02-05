@@ -6,6 +6,7 @@ from services.auth_service.schemas.auth import (
     OAuthUrlResponse,
     PasswordResetRequest,
     PasswordUpdate,
+    RefreshTokenRequest,
     TokenResponse,
     UserLogin,
     UserRegister,
@@ -43,6 +44,19 @@ async def oauth_callback(code: str = Query(..., description="Auth code from Supa
     """Intercambia el code de OAuth por access_token + refresh_token."""
     session = await AuthManager.exchange_code_for_session(code)
     return _build_response(session)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(data: RefreshTokenRequest):
+    """Intercambia un refresh_token por un nuevo par de tokens."""
+    session = await AuthManager.refresh_session(data.refresh_token)
+    return _build_response(session)
+
+
+@router.post("/logout", status_code=204)
+async def logout(token: str = Depends(get_current_token)):
+    """Revoca la sesión actual del usuario."""
+    await AuthManager.logout(token)
 
 
 @router.post("/password/recovery")
