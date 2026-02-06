@@ -140,3 +140,31 @@ class JourneyAdminRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Journey Organization (multi-org assignment) schemas
+# ---------------------------------------------------------------------------
+class JourneyOrganizationAssign(BaseModel):
+    organization_ids: list[UUID4] = Field(..., min_length=1)
+
+
+class JourneyOrganizationUnassign(BaseModel):
+    organization_ids: list[UUID4] = Field(..., min_length=1)
+
+
+class JourneyOrganizationRead(BaseModel):
+    id: UUID4
+    journey_id: UUID4
+    organization_id: UUID4
+    assigned_at: datetime
+    assigned_by: UUID4 | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class JourneyOrganizationsResponse(BaseModel):
+    journey_id: UUID4
+    organizations: list[JourneyOrganizationRead] = []
+    total: int = 0

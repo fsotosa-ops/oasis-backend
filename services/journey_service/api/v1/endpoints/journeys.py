@@ -48,8 +48,8 @@ async def get_journey(
     _ctx=Depends(MemberRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    belongs = await crud.verify_journey_belongs_to_org(db, journey_id, org_id)
-    if not belongs:
+    accessible = await crud.verify_journey_accessible_by_org(db, journey_id, org_id)
+    if not accessible:
         raise ForbiddenError("El journey no pertenece a tu organizacion.")
 
     journey = await crud.get_journey_with_steps(db, journey_id)

@@ -14,10 +14,23 @@ async def get_journeys_for_org(
     skip: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict], int]:
+    # Get journey IDs assigned to this org via junction table
+    jo_response = (
+        await db.schema("journeys")
+        .table("journey_organizations")
+        .select("journey_id")
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    assigned_ids = [row["journey_id"] for row in (jo_response.data or [])]
+
+    if not assigned_ids:
+        return [], 0
+
     query = (
         db.schema("journeys").table("journeys")
         .select("*", count="exact")
-        .eq("organization_id", org_id)
+        .in_("id", assigned_ids)
     )
 
     if is_active is not None:
@@ -95,6 +108,23 @@ async def verify_journey_belongs_to_org(
     return len(response.data) > 0 if response.data else False
 
 
+async def verify_journey_accessible_by_org(
+    db: AsyncClient,
+    journey_id: UUID,
+    org_id: str,
+) -> bool:
+    """Check if a journey is accessible by an org (owned OR assigned via junction table)."""
+    response = (
+        await db.schema("journeys")
+        .table("journey_organizations")
+        .select("id")
+        .eq("journey_id", str(journey_id))
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    return len(response.data) > 0 if response.data else False
+
+
 # ---------------------------------------------------------------------------
 # Admin CRUD operations
 # ---------------------------------------------------------------------------
@@ -114,7 +144,18 @@ async def create_journey(
     }
 
     response = await db.schema("journeys").table("journeys").insert(payload).execute()
-    return response.data[0] if response.data else {}
+    created = response.data[0] if response.data else {}
+
+    # Auto-assign to owner organization in junction table
+    if created:
+        await db.schema("journeys").table("journey_organizations").insert(
+            {
+                "journey_id": created["id"],
+                "organization_id": org_id,
+            }
+        ).execute()
+
+    return created
 
 
 async def update_journey(
