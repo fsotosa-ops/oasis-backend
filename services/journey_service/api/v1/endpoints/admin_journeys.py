@@ -98,7 +98,7 @@ async def update_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     updated = await crud.update_journey(db, journey_id, payload)
@@ -120,7 +120,7 @@ async def delete_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     deleted = await crud.delete_journey(db, journey_id)
@@ -142,7 +142,7 @@ async def publish_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     await crud.publish_journey(db, journey_id)
@@ -161,7 +161,7 @@ async def archive_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     await crud.archive_journey(db, journey_id)

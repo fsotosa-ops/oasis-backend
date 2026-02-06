@@ -51,7 +51,7 @@ async def create_step(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await journeys_crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     step = await crud.create_step(db, journey_id, payload)
@@ -75,7 +75,7 @@ async def update_step(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await journeys_crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     updated = await crud.update_step(db, step_id, payload)
@@ -97,7 +97,7 @@ async def delete_step(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await journeys_crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     deleted = await crud.delete_step(db, step_id)
@@ -120,7 +120,7 @@ async def reorder_steps(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await journeys_crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     step_orders = [
