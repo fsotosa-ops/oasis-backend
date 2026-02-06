@@ -72,7 +72,8 @@ class OrgContext:
 
 
 class OrgRoleRequired:
-    """Factory de dependency que valida el rol del usuario en una org (usa path param org_id)."""
+    """Factory de dependency que valida el rol del usuario en una org (usa path param org_id).
+    Los platform admins pueden acceder a cualquier organizacion sin ser miembros."""
 
     def __init__(self, *allowed_roles: str):
         self.allowed_roles = set(allowed_roles)
@@ -80,8 +81,17 @@ class OrgRoleRequired:
     async def __call__(
         self,
         org_id: str = Path(...),
+        user=Depends(get_current_user),
         memberships: list[dict] = Depends(get_user_memberships),
     ) -> OrgContext:
+        # Platform admins tienen acceso total a cualquier organizacion
+        if user.user_metadata.get("is_platform_admin", False):
+            return OrgContext(
+                organization_id=org_id,
+                role="owner",
+                status="active",
+            )
+
         for m in memberships:
             if m["organization_id"] == org_id:
                 if m["status"] != "active":

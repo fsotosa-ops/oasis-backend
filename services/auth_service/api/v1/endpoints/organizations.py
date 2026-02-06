@@ -24,12 +24,14 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=list[dict])
-async def list_my_organizations(
+@router.get("")
+async def list_organizations(
     user: CurrentUser,
     token: str = Depends(get_current_token),
 ):
-    """Lista las organizaciones donde el usuario es miembro activo."""
+    """Lista organizaciones. Platform admin ve TODAS, usuarios normales solo las suyas."""
+    if user.user_metadata.get("is_platform_admin", False):
+        return await OrgManager.list_all_orgs()
     return await OrgManager.list_my_orgs(token, str(user.id))
 
 
@@ -47,12 +49,11 @@ async def get_organization(
 async def create_organization(
     data: OrgCreate,
     user: AdminUser,
-    token: str = Depends(get_current_token),
 ):
     """Crea una organizacion (solo platform admin). El owner_user_id indica quien sera el owner."""
     payload = data.model_dump(exclude_unset=True, exclude={"owner_user_id"})
     owner_id = data.owner_user_id or str(user.id)
-    return await OrgManager.create_org(token, payload, owner_id)
+    return await OrgManager.create_org(payload, owner_id)
 
 
 @router.patch("/{org_id}", response_model=OrgResponse)

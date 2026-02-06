@@ -1,6 +1,6 @@
 import logging
 
-from common.database.client import get_scoped_client
+from common.database.client import get_admin_client, get_scoped_client
 
 logger = logging.getLogger("oasis.org_manager")
 
@@ -27,6 +27,18 @@ class OrgManager:
         return response.data or []
 
     @staticmethod
+    async def list_all_orgs() -> list[dict]:
+        """Lista TODAS las organizaciones (solo para platform admin). Usa admin client para bypassear RLS."""
+        admin = await get_admin_client()
+        response = (
+            await admin.table("organizations")
+            .select("id, name, slug, description, logo_url, type, settings, created_at, updated_at")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return response.data or []
+
+    @staticmethod
     async def get_org(token: str, org_id: str) -> dict:
         """Obtiene una organizacion por ID (RLS aplica)."""
         client = await get_scoped_client(token)
@@ -40,24 +52,24 @@ class OrgManager:
         return response.data
 
     @staticmethod
-    async def create_org(token: str, data: dict, creator_user_id: str) -> dict:
-        """Crea una organizacion y asigna al creador como owner."""
-        client = await get_scoped_client(token)
+    async def create_org(data: dict, owner_user_id: str) -> dict:
+        """Crea una organizacion y asigna al owner. Usa admin client para bypassear RLS."""
+        admin = await get_admin_client()
 
         # Insertar organizacion
         org_response = (
-            await client.table("organizations")
+            await admin.table("organizations")
             .insert(data)
             .execute()
         )
         org = org_response.data[0]
 
-        # Insertar al creador como owner
+        # Insertar al owner
         await (
-            client.table("organization_members")
+            admin.table("organization_members")
             .insert({
                 "organization_id": org["id"],
-                "user_id": creator_user_id,
+                "user_id": owner_user_id,
                 "role": "owner",
                 "status": "active",
             })
