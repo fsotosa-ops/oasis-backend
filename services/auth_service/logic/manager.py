@@ -187,13 +187,11 @@ class AuthManager:
         """Actualiza is_platform_admin en profiles y en auth.users metadata."""
         admin = await get_admin_client()
 
-        # 1. Actualizar tabla profiles
-        await (
-            admin.table("profiles")
-            .update({"is_platform_admin": is_admin})
-            .eq("id", user_id)
-            .execute()
-        )
+        # 1. Actualizar tabla profiles via RPC (SECURITY DEFINER bypassa RLS)
+        await admin.rpc("admin_update_profile", {
+            "p_user_id": user_id,
+            "p_is_platform_admin": is_admin,
+        }).execute()
 
         # 2. Sincronizar raw_user_meta_data en auth.users
         await admin.auth.admin.update_user_by_id(
@@ -213,25 +211,19 @@ class AuthManager:
 
     @staticmethod
     async def update_user_by_admin(user_id: str, data: dict) -> dict:
-        """Actualiza perfil de un usuario via admin client (bypassa RLS)."""
+        """Actualiza perfil de un usuario via RPC (SECURITY DEFINER bypassa RLS)."""
         admin = await get_admin_client()
 
-        profile_fields = {}
+        # 1. Actualizar tabla profiles via RPC
+        rpc_params: dict = {"p_user_id": user_id}
         if "full_name" in data:
-            profile_fields["full_name"] = data["full_name"]
+            rpc_params["p_full_name"] = data["full_name"]
         if "status" in data:
-            profile_fields["status"] = data["status"]
+            rpc_params["p_status"] = data["status"]
         if "is_platform_admin" in data:
-            profile_fields["is_platform_admin"] = data["is_platform_admin"]
+            rpc_params["p_is_platform_admin"] = data["is_platform_admin"]
 
-        # 1. Actualizar tabla profiles
-        if profile_fields:
-            await (
-                admin.table("profiles")
-                .update(profile_fields)
-                .eq("id", user_id)
-                .execute()
-            )
+        await admin.rpc("admin_update_profile", rpc_params).execute()
 
         # 2. Si is_platform_admin cambia, sincronizar con auth.users metadata
         if "is_platform_admin" in data:

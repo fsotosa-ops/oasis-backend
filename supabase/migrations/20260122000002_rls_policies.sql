@@ -168,3 +168,33 @@ USING (
 -- DONE
 -- =============================================================================
 COMMENT ON SCHEMA public IS 'OASIS Platform - Multi-tenant with RLS';
+
+
+
+-- =============================================================================
+-- V2 UPDATE FUNCTION admin_update_profile
+-- =============================================================================
+CREATE OR REPLACE FUNCTION admin_update_profile(                                        
+    p_user_id UUID,                                                                       
+    p_full_name TEXT DEFAULT NULL,                                                        
+    p_status TEXT DEFAULT NULL,                                                           
+    p_is_platform_admin BOOLEAN DEFAULT NULL                                              
+  ) RETURNS VOID
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public
+  AS $$
+  BEGIN
+    UPDATE profiles SET
+      full_name = COALESCE(p_full_name, full_name),
+      is_platform_admin = COALESCE(p_is_platform_admin, is_platform_admin),
+      updated_at = NOW()
+    WHERE id = p_user_id;
+
+    IF p_status IS NOT NULL THEN
+      EXECUTE format('UPDATE profiles SET status = %L WHERE id = %L', p_status,
+  p_user_id);
+    END IF;
+  END;
+  $$;
+
