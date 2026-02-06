@@ -11,6 +11,9 @@ from common.auth.security import (
 )
 from services.auth_service.logic.org_manager import OrgManager
 from services.auth_service.schemas.auth import (
+    BulkMemberAdd,
+    BulkMemberAddResponse,
+    MemberAdd,
     MemberInvite,
     MemberResponse,
     MemberUpdate,
@@ -116,7 +119,49 @@ async def invite_member(
 ):
     """Invita un usuario a la organizacion (requiere owner o admin)."""
     return await OrgManager.invite_member(
-        token, org.organization_id, data.user_id, data.role, str(user.id)
+        token, org.organization_id, data.email, data.role, str(user.id)
+    )
+
+
+@router.post(
+    "/{org_id}/members/add",
+    response_model=MemberResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_member(
+    data: MemberAdd,
+    user: CurrentUser,
+    token: str = Depends(get_current_token),
+    org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
+):
+    """Agrega un miembro directamente como activo (requiere owner o admin)."""
+    return await OrgManager.add_member(
+        token, org.organization_id, data.email, data.role, str(user.id)
+    )
+
+
+@router.post(
+    "/{org_id}/members/bulk",
+    response_model=BulkMemberAddResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def bulk_add_members(
+    data: BulkMemberAdd,
+    user: CurrentUser,
+    token: str = Depends(get_current_token),
+    org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
+):
+    """Agrega multiples miembros de una vez (requiere owner o admin)."""
+    members_dicts = [m.model_dump() for m in data.members]
+    results = await OrgManager.bulk_add_members(
+        token, org.organization_id, members_dicts, str(user.id)
+    )
+    succeeded = sum(1 for r in results if r["success"])
+    return BulkMemberAddResponse(
+        total=len(results),
+        succeeded=succeeded,
+        failed=len(results) - succeeded,
+        results=results,
     )
 
 

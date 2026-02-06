@@ -156,13 +156,41 @@ class OrgResponse(BaseModel):
 # Member schemas
 # ---------------------------------------------------------------------------
 class MemberInvite(BaseModel):
-    user_id: str
+    email: EmailStr
+    role: MemberRole = MemberRole.participante
+
+
+class MemberAdd(BaseModel):
+    email: EmailStr
     role: MemberRole = MemberRole.participante
 
 
 class MemberUpdate(BaseModel):
     role: Optional[MemberRole] = None
     status: Optional[MembershipStatus] = None
+
+
+class BulkMemberItem(BaseModel):
+    email: EmailStr
+    role: MemberRole = MemberRole.participante
+
+
+class BulkMemberAdd(BaseModel):
+    members: list[BulkMemberItem] = Field(..., min_length=1, max_length=500)
+
+
+class BulkMemberResultItem(BaseModel):
+    email: str
+    success: bool
+    error: Optional[str] = None
+    member: Optional["MemberResponse"] = None
+
+
+class BulkMemberAddResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    results: list[BulkMemberResultItem]
 
 
 class MemberUserProfile(BaseModel):
