@@ -165,6 +165,13 @@ class MemberUpdate(BaseModel):
     status: Optional[MembershipStatus] = None
 
 
+class MemberUserProfile(BaseModel):
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    is_platform_admin: bool = False
+
+
 class MemberResponse(BaseModel):
     id: str
     organization_id: str
@@ -174,3 +181,4 @@ class MemberResponse(BaseModel):
     invited_by: Optional[str] = None
     invited_at: Optional[datetime] = None
     joined_at: Optional[datetime] = None
+    user: Optional[MemberUserProfile] = None
