@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
-from common.auth.security import AdminUser, OrgRoleRequired
+from common.auth.security import AdminUser, OrgRoleRequired, get_current_user
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.journey_service.crud import journeys as crud
@@ -73,10 +73,13 @@ async def get_journey_admin(
     org_id: str,
     journey_id: UUID,
     _ctx=Depends(AdminRequired),  # noqa: B008
+    user=Depends(get_current_user),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
-        raise ForbiddenError("No tienes acceso a este journey.")
+    is_platform_admin = user.user_metadata.get("is_platform_admin", False)
+    if not is_platform_admin:
+        if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
+            raise ForbiddenError("No tienes acceso a este journey.")
 
     journey = await crud.get_journey_admin(db, journey_id)
 
@@ -98,9 +101,6 @@ async def update_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
-        raise ForbiddenError("No tienes acceso a este journey.")
-
     updated = await crud.update_journey(db, journey_id, payload)
 
     if not updated:
@@ -120,9 +120,6 @@ async def delete_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
-        raise ForbiddenError("No tienes acceso a este journey.")
-
     deleted = await crud.delete_journey(db, journey_id)
 
     if not deleted:
@@ -142,9 +139,6 @@ async def publish_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
-        raise ForbiddenError("No tienes acceso a este journey.")
-
     await crud.publish_journey(db, journey_id)
     journey = await crud.get_journey_admin(db, journey_id)
     return journey
@@ -161,9 +155,6 @@ async def archive_journey(
     _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
-        raise ForbiddenError("No tienes acceso a este journey.")
-
     await crud.archive_journey(db, journey_id)
     journey = await crud.get_journey_admin(db, journey_id)
     return journey
