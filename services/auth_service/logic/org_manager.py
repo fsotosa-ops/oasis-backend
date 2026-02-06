@@ -113,18 +113,26 @@ class OrgManager:
     # ------------------------------------------------------------------
     @staticmethod
     async def list_members(token: str, org_id: str) -> list[dict]:
-        """Lista los miembros de una organizacion."""
+        """Lista los miembros de una organizacion con datos del perfil."""
         client = await get_scoped_client(token)
         response = (
             await client.table("organization_members")
             .select(
                 "id, organization_id, user_id, role, status, "
-                "invited_by, invited_at, joined_at"
+                "invited_by, invited_at, joined_at, "
+                "profiles(id, email, full_name, is_platform_admin)"
             )
             .eq("organization_id", org_id)
             .execute()
         )
-        return response.data or []
+        # Flatten nested profiles data into a 'user' key for the frontend
+        result = []
+        for row in (response.data or []):
+            profile = row.pop("profiles", None)
+            if profile:
+                row["user"] = profile
+            result.append(row)
+        return result
 
     @staticmethod
     async def invite_member(
