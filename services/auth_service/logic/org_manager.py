@@ -113,10 +113,11 @@ class OrgManager:
     # ------------------------------------------------------------------
     @staticmethod
     async def list_members(token: str, org_id: str) -> list[dict]:
-        """Lista los miembros de una organizacion con datos del perfil."""
-        client = await get_scoped_client(token)
+        """Lista los miembros de una organizacion con datos del perfil.
+        Usa admin client para bypassear RLS en profiles."""
+        admin = await get_admin_client()
         response = (
-            await client.table("organization_members")
+            await admin.table("organization_members")
             .select(
                 "id, organization_id, user_id, role, status, "
                 "invited_by, invited_at, joined_at, "
