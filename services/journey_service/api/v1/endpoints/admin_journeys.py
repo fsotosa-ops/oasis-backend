@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
-from common.auth.security import OrgRoleRequired
+from common.auth.security import AdminUser, OrgRoleRequired
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.journey_service.crud import journeys as crud
@@ -50,7 +50,7 @@ async def list_journeys_admin(
 async def create_journey(
     org_id: str,
     payload: JourneyCreate,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     journey = await crud.create_journey(db, org_id, payload)
@@ -75,7 +75,7 @@ async def get_journey_admin(
     _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     journey = await crud.get_journey_admin(db, journey_id)
@@ -95,7 +95,7 @@ async def update_journey(
     org_id: str,
     journey_id: UUID,
     payload: JourneyUpdate,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -117,7 +117,7 @@ async def update_journey(
 async def delete_journey(
     org_id: str,
     journey_id: UUID,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -139,7 +139,7 @@ async def delete_journey(
 async def publish_journey(
     org_id: str,
     journey_id: UUID,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -158,7 +158,7 @@ async def publish_journey(
 async def archive_journey(
     org_id: str,
     journey_id: UUID,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await crud.verify_journey_belongs_to_org(db, journey_id, org_id):

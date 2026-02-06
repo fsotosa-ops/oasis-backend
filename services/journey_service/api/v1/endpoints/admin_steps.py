@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from common.auth.security import OrgRoleRequired
+from common.auth.security import AdminUser, OrgRoleRequired
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.journey_service.crud import journeys as journeys_crud
@@ -31,7 +31,7 @@ async def list_steps(
     _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
+    if not await journeys_crud.verify_journey_accessible_by_org(db, journey_id, org_id):
         raise ForbiddenError("No tienes acceso a este journey.")
 
     steps = await crud.list_steps(db, journey_id)
@@ -48,7 +48,7 @@ async def create_step(
     org_id: str,
     journey_id: UUID,
     payload: StepCreate,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -72,7 +72,7 @@ async def update_step(
     journey_id: UUID,
     step_id: UUID,
     payload: StepUpdate,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -94,7 +94,7 @@ async def delete_step(
     org_id: str,
     journey_id: UUID,
     step_id: UUID,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):
@@ -117,7 +117,7 @@ async def reorder_steps(
     org_id: str,
     journey_id: UUID,
     payload: StepReorderRequest,
-    _ctx=Depends(AdminRequired),  # noqa: B008
+    _admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     if not await journeys_crud.verify_journey_belongs_to_org(db, journey_id, org_id):

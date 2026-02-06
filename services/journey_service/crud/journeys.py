@@ -246,18 +246,33 @@ async def list_journeys_admin(
     skip: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict], int]:
+    # Get journey IDs assigned to this org via junction table
+    jo_response = (
+        await db.schema("journeys")
+        .table("journey_organizations")
+        .select("journey_id")
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    assigned_ids = [row["journey_id"] for row in (jo_response.data or [])]
+
+    if not assigned_ids:
+        return [], 0
+
     query = (
         db.schema("journeys").table("journeys")
         .select("*", count="exact")
-        .eq("organization_id", org_id)
-        .order("created_at", desc=True)
-        .range(skip, skip + limit - 1)
+        .in_("id", assigned_ids)
     )
 
     if is_active is not None:
         query = query.eq("is_active", is_active)
 
-    response = await query.execute()
+    response = (
+        await query.order("created_at", desc=True)
+        .range(skip, skip + limit - 1)
+        .execute()
+    )
     journeys = response.data or []
     total = response.count or 0
 
