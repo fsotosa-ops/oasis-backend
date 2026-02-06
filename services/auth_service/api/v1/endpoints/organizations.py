@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from common.auth.security import (
     AdminUser,
@@ -16,6 +18,8 @@ from services.auth_service.schemas.auth import (
     OrgResponse,
     OrgUpdate,
 )
+
+logger = logging.getLogger("oasis.organizations")
 
 router = APIRouter()
 
@@ -53,7 +57,14 @@ async def create_organization(
     """Crea una organizacion (solo platform admin). El owner_user_id indica quien sera el owner."""
     payload = data.model_dump(exclude_unset=True, exclude={"owner_user_id"})
     owner_id = data.owner_user_id or str(user.id)
-    return await OrgManager.create_org(payload, owner_id)
+    try:
+        return await OrgManager.create_org(payload, owner_id)
+    except Exception as exc:
+        logger.exception("Error creating organization: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al crear organizacion: {exc}",
+        ) from exc
 
 
 @router.patch("/{org_id}", response_model=OrgResponse)

@@ -24,7 +24,14 @@ class OrgManager:
             .eq("status", "active")
             .execute()
         )
-        return response.data or []
+        # Flatten: extract nested organization data so the response
+        # matches the same shape as list_all_orgs() (ApiOrganization[]).
+        result = []
+        for row in (response.data or []):
+            org_data = row.get("organizations")
+            if org_data:
+                result.append(org_data)
+        return result
 
     @staticmethod
     async def list_all_orgs() -> list[dict]:
