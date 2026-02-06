@@ -212,6 +212,45 @@ class AuthManager:
         return profile_resp.data
 
     @staticmethod
+    async def update_user_by_admin(user_id: str, data: dict) -> dict:
+        """Actualiza perfil de un usuario via admin client (bypassa RLS)."""
+        admin = await get_admin_client()
+
+        profile_fields = {}
+        if "full_name" in data:
+            profile_fields["full_name"] = data["full_name"]
+        if "status" in data:
+            profile_fields["status"] = data["status"]
+        if "is_platform_admin" in data:
+            profile_fields["is_platform_admin"] = data["is_platform_admin"]
+
+        # 1. Actualizar tabla profiles
+        if profile_fields:
+            await (
+                admin.table("profiles")
+                .update(profile_fields)
+                .eq("id", user_id)
+                .execute()
+            )
+
+        # 2. Si is_platform_admin cambia, sincronizar con auth.users metadata
+        if "is_platform_admin" in data:
+            await admin.auth.admin.update_user_by_id(
+                user_id,
+                {"user_metadata": {"is_platform_admin": data["is_platform_admin"]}},
+            )
+
+        # 3. Re-fetch para devolver el perfil actualizado
+        profile_resp = (
+            await admin.table("profiles")
+            .select("id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        return profile_resp.data
+
+    @staticmethod
     async def delete_user_by_admin(target_user_id: str):
         admin = await get_admin_client()
         await admin.auth.admin.delete_user(target_user_id)

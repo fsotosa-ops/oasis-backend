@@ -115,6 +115,12 @@ class AdminUserUpdate(BaseModel):
     is_platform_admin: bool
 
 
+class AdminUserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    status: Optional[AccountStatus] = None
+    is_platform_admin: Optional[bool] = None
+
+
 class PaginatedUsersResponse(BaseModel):
     users: list[UserResponse]
     count: int

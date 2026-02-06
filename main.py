@@ -12,6 +12,7 @@ from common.exceptions import (
     oasis_exception_handler,
     postgrest_error_handler,
 )
+from services.analytics_service.api.v1.api import api_router as analytics_router
 from services.auth_service.api.v1.api import api_router as auth_router
 from services.journey_service.api.v1.api import api_router as journey_router
 
@@ -48,6 +49,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # ---------------------------------------------------------------------------
 app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(journey_router, prefix="/api/v1/journeys")
+app.include_router(analytics_router, prefix="/api/v1/analytics")
 
 
 # ---------------------------------------------------------------------------

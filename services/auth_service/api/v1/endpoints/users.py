@@ -4,6 +4,7 @@ from common.auth.security import AdminUser, CurrentUser, get_current_token
 from common.exceptions import OasisException
 from services.auth_service.logic.manager import AuthManager
 from services.auth_service.schemas.auth import (
+    AdminUserProfileUpdate,
     AdminUserUpdate,
     PaginatedUsersResponse,
     UserResponse,
@@ -39,6 +40,31 @@ async def set_platform_admin(
             status_code=400,
         )
     profile = await AuthManager.set_platform_admin(user_id, data.is_platform_admin)
+    return profile
+
+
+@router.patch("/{user_id}", response_model=UserResponse)
+async def update_user_by_admin(
+    user_id: str,
+    data: AdminUserProfileUpdate,
+    admin: AdminUser,
+):
+    """Actualiza perfil de un usuario como platform admin."""
+    raw = data.model_dump(exclude_unset=True)
+    if not raw:
+        raise OasisException(
+            code="no_fields_to_update",
+            message="Debes enviar al menos un campo a actualizar.",
+            status_code=400,
+        )
+    # No puede cambiar su propio is_platform_admin
+    if "is_platform_admin" in raw and user_id == str(admin.id):
+        raise OasisException(
+            code="self_admin_change_forbidden",
+            message="No puedes cambiar tu propio status de admin.",
+            status_code=400,
+        )
+    profile = await AuthManager.update_user_by_admin(user_id, raw)
     return profile
 
 
