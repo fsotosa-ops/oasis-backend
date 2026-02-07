@@ -198,3 +198,39 @@ CREATE OR REPLACE FUNCTION admin_update_profile(
   END;
   $$;
 
+CREATE OR REPLACE FUNCTION protect_sensitive_columns()                                  
+  RETURNS TRIGGER AS $$                                                                   
+  BEGIN                                                                                   
+      IF (NEW.is_platform_admin IS DISTINCT FROM OLD.is_platform_admin) THEN              
+          -- Si auth.uid() es NULL → es service_role o postgres → permitir
+          IF auth.uid() IS NULL THEN
+              RETURN NEW;
+          END IF;
+          -- Para usuarios autenticados, verificar que sea admin
+          IF NOT COALESCE((SELECT is_platform_admin FROM public.profiles WHERE id =
+  auth.uid()), FALSE) THEN
+              NEW.is_platform_admin := OLD.is_platform_admin;
+          END IF;
+      END IF;
+      RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+
+
+  CREATE OR REPLACE FUNCTION prevent_admin_escalation()                                   
+  RETURNS TRIGGER AS $$                                                                   
+  BEGIN                                                                                   
+      IF (NEW.is_platform_admin IS DISTINCT FROM OLD.is_platform_admin) THEN              
+          -- Si auth.uid() es NULL → es service_role o postgres → permitir                
+          IF auth.uid() IS NULL THEN                                                      
+              RETURN NEW;                                                                 
+          END IF;                                                                         
+          -- Para usuarios autenticados, verificar que sea admin                          
+          IF NOT COALESCE((SELECT is_platform_admin FROM public.profiles WHERE id =       
+  auth.uid()), FALSE) THEN                                                                
+              NEW.is_platform_admin := OLD.is_platform_admin;                             
+          END IF;                                                                         
+      END IF;                                                                             
+      RETURN NEW;                                                                         
+  END;                                                                                    
+  $$ LANGUAGE plpgsql;     
