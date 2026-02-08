@@ -12,6 +12,7 @@ class EnrollmentResponse(BaseModel):
     id: UUID4
     user_id: UUID4
     journey_id: UUID4
+    organization_id: UUID4 | None = None
     status: str
     current_step_index: int
     progress_percentage: float

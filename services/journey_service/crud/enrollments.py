@@ -47,7 +47,7 @@ async def get_enrollment_by_id(db: AsyncClient, enrollment_id: UUID) -> dict | N
 async def get_user_enrollments(
     db: AsyncClient, user_id: UUID, status: str | None = None
 ) -> list[dict]:
-    query = db.schema("journeys").table("enrollments").select("*").eq("user_id", str(user_id))
+    query = db.schema("journeys").table("enrollments").select("*, journeys(organization_id)").eq("user_id", str(user_id))
 
     if status:
         query = query.eq("status", status)
