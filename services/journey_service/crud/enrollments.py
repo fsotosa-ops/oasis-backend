@@ -20,14 +20,13 @@ async def get_active_enrollment(
 
 
 async def create_enrollment(
-    db: AsyncClient, user_id: UUID, journey_id: UUID, metadata: dict | None = None
+    db: AsyncClient, user_id: UUID, journey_id: UUID
 ) -> dict:
     payload = {
         "user_id": str(user_id),
         "journey_id": str(journey_id),
         "status": "active",
         "current_step_index": 0,
-        "metadata": metadata or {},
     }
 
     response = await db.schema("journeys").table("enrollments").insert(payload).execute()

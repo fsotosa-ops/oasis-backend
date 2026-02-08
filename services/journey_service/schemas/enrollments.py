@@ -6,7 +6,6 @@ from pydantic import UUID4, BaseModel, Field
 
 class EnrollmentCreate(BaseModel):
     journey_id: UUID4 = Field(..., description="ID del Journey a iniciar.")
-    metadata: dict | None = Field(default_factory=dict)
 
 
 class EnrollmentResponse(BaseModel):
