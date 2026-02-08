@@ -47,13 +47,31 @@ async def get_enrollment_by_id(db: AsyncClient, enrollment_id: UUID) -> dict | N
 async def get_user_enrollments(
     db: AsyncClient, user_id: UUID, status: str | None = None
 ) -> list[dict]:
-    query = db.schema("journeys").table("enrollments").select("*, journeys(organization_id)").eq("user_id", str(user_id))
+    query = db.schema("journeys").table("enrollments").select("*").eq("user_id", str(user_id))
 
     if status:
         query = query.eq("status", status)
 
     response = await query.order("started_at", desc=True).execute()
-    return response.data or []
+    enrollments = response.data or []
+
+    if not enrollments:
+        return []
+
+    # Fetch organization_id for each journey
+    journey_ids = list({e["journey_id"] for e in enrollments})
+    journeys_response = (
+        await db.schema("journeys").table("journeys")
+        .select("id, organization_id")
+        .in_("id", journey_ids)
+        .execute()
+    )
+    org_map = {j["id"]: j["organization_id"] for j in (journeys_response.data or [])}
+
+    for e in enrollments:
+        e["organization_id"] = org_map.get(e["journey_id"])
+
+    return enrollments
 
 
 async def get_enrollment_with_progress(

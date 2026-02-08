@@ -70,7 +70,7 @@ async def get_my_enrollments(
             id=e["id"],
             user_id=e["user_id"],
             journey_id=e["journey_id"],
-            organization_id=e.get("journeys", {}).get("organization_id") if e.get("journeys") else None,
+            organization_id=e.get("organization_id"),
             status=e["status"],
             current_step_index=e["current_step_index"],
             progress_percentage=e.get("progress_percentage", 0.0),
