@@ -63,9 +63,11 @@ class EnrollmentDetailResponse(BaseModel):
 class StepCompleteRequest(BaseModel):
     metadata: dict | None = None
     external_reference: str | None = None
+    service_data: dict | None = None
 
 
 class StepCompleteResponse(BaseModel):
     step_id: UUID4
     completed_at: datetime
     enrollment_progress: float
+    points_earned: int = 0

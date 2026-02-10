@@ -253,18 +253,107 @@ async def update_enrollment_status(
     return response.data[0] if response.data else {}
 
 
+async def get_step_by_id(db: AsyncClient, step_id: UUID) -> dict | None:
+    response = (
+        await db.schema("journeys").table("steps")
+        .select("id, type, config, gamification_rules")
+        .eq("id", str(step_id))
+        .single()
+        .execute()
+    )
+    return response.data
+
+
+def _build_enriched_metadata(
+    step: dict,
+    client_metadata: dict | None,
+    external_reference: str | None,
+    service_data: dict | None,
+) -> dict:
+    """Build contextual metadata based on step type and config."""
+    from datetime import datetime, UTC
+
+    step_type = step.get("type", "")
+    config = step.get("config") or {}
+    now = datetime.now(UTC).isoformat()
+
+    enriched: dict = {"step_type": step_type, "completed_at": now}
+
+    # Extract service info from step config
+    source_url = config.get("resource") or config.get("source_url") or config.get("url")
+
+    if step_type == "survey":
+        enriched["service"] = "typeform"
+        form_id = config.get("typeform_id") or config.get("form_id")
+        if form_id:
+            enriched["form_id"] = form_id
+        if external_reference:
+            enriched["response_id"] = external_reference
+
+    elif step_type == "content_view":
+        if source_url:
+            enriched["source_url"] = source_url
+            if "youtube" in str(source_url):
+                enriched["service"] = "youtube"
+            elif "vimeo" in str(source_url):
+                enriched["service"] = "vimeo"
+            else:
+                enriched["service"] = "video"
+
+    elif step_type == "resource_consumption":
+        if source_url:
+            enriched["source_url"] = source_url
+            if ".pdf" in str(source_url).lower():
+                enriched["service"] = "pdf"
+            elif "docs.google" in str(source_url) or "slides.google" in str(source_url):
+                enriched["service"] = "google_slides"
+            else:
+                enriched["service"] = "resource"
+
+    elif step_type == "milestone":
+        if source_url:
+            enriched["source_url"] = source_url
+            if "kahoot" in str(source_url):
+                enriched["service"] = "kahoot"
+            else:
+                enriched["service"] = "milestone"
+
+    elif step_type == "event_attendance":
+        enriched["service"] = "event"
+
+    elif step_type == "social_interaction":
+        enriched["service"] = "social"
+
+    # Merge client-provided metadata and service_data
+    if client_metadata:
+        enriched.update(client_metadata)
+    if service_data:
+        enriched["service_data"] = service_data
+
+    return enriched
+
+
 async def complete_step(
     db: AsyncClient,
     enrollment_id: UUID,
     step_id: UUID,
     metadata: dict | None = None,
     external_reference: str | None = None,
+    service_data: dict | None = None,
 ) -> dict:
+    # Fetch step to enrich metadata
+    step = await get_step_by_id(db, step_id)
+    enriched_metadata = (
+        _build_enriched_metadata(step, metadata, external_reference, service_data)
+        if step
+        else metadata or {}
+    )
+
     payload = {
         "enrollment_id": str(enrollment_id),
         "step_id": str(step_id),
         "points_earned": 0,
-        "metadata": metadata or {},
+        "metadata": enriched_metadata,
     }
     if external_reference:
         payload["external_reference"] = external_reference

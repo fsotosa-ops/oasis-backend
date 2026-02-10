@@ -14,7 +14,7 @@ StepType = Literal[
 
 
 class GamificationRules(BaseModel):
-    points_base: int = 0
+    base_points: int = 0
     bonus_rules: dict[str, Any] | None = Field(
         default=None, description="Reglas extra ej: {'min_duration': 60, 'bonus': 5}"
     )

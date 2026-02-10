@@ -161,9 +161,13 @@ async def complete_step(
 
     metadata = body.metadata if body else None
     external_reference = body.external_reference if body else None
+    service_data = body.service_data if body else None
 
     completion = await crud.complete_step(
-        db, enrollment_id, step_id, metadata=metadata, external_reference=external_reference
+        db, enrollment_id, step_id,
+        metadata=metadata,
+        external_reference=external_reference,
+        service_data=service_data,
     )
 
     updated_enrollment = await crud.get_enrollment_by_id(db, enrollment_id)
@@ -173,6 +177,7 @@ async def complete_step(
         step_id=completion["step_id"],
         completed_at=completion["completed_at"],
         enrollment_progress=progress,
+        points_earned=completion.get("points_earned", 0),
     )
 
 
