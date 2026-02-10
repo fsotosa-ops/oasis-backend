@@ -270,53 +270,47 @@ def _build_enriched_metadata(
     external_reference: str | None,
     service_data: dict | None,
 ) -> dict:
-    """Build contextual metadata based on step type and config."""
+    """Build contextual metadata based on step type and config.
+
+    The step config already stores resource URLs in config.resource
+    (e.g. { type, source_url, embed_url }), so we do NOT duplicate URLs here.
+    We only capture:
+      - service type (from config.resource.type or step type)
+      - completion-specific data (response_id, timestamps, etc.)
+    """
     from datetime import datetime, UTC
 
     step_type = step.get("type", "")
     config = step.get("config") or {}
     now = datetime.now(UTC).isoformat()
 
+    # config.resource is an object: { type, source_url, embed_url }
+    resource = config.get("resource") or {}
+    resource_type = resource.get("type") if isinstance(resource, dict) else None
+
     enriched: dict = {"step_type": step_type, "completed_at": now}
 
-    # Extract service info from step config
-    source_url = config.get("resource") or config.get("source_url") or config.get("url")
-
     if step_type == "survey":
-        enriched["service"] = "typeform"
-        form_id = config.get("typeform_id") or config.get("form_id")
-        if form_id:
-            enriched["form_id"] = form_id
+        enriched["service"] = resource_type or "typeform"
+        # Extract form_id from the Typeform URL if present
+        source_url = resource.get("source_url", "") if isinstance(resource, dict) else ""
+        if isinstance(source_url, str) and "typeform.com/to/" in source_url:
+            parts = source_url.split("typeform.com/to/")
+            if len(parts) > 1:
+                form_id = parts[1].split("?")[0].split("/")[0]
+                if form_id:
+                    enriched["form_id"] = form_id
         if external_reference:
             enriched["response_id"] = external_reference
 
     elif step_type == "content_view":
-        if source_url:
-            enriched["source_url"] = source_url
-            if "youtube" in str(source_url):
-                enriched["service"] = "youtube"
-            elif "vimeo" in str(source_url):
-                enriched["service"] = "vimeo"
-            else:
-                enriched["service"] = "video"
+        enriched["service"] = resource_type or "video"
 
     elif step_type == "resource_consumption":
-        if source_url:
-            enriched["source_url"] = source_url
-            if ".pdf" in str(source_url).lower():
-                enriched["service"] = "pdf"
-            elif "docs.google" in str(source_url) or "slides.google" in str(source_url):
-                enriched["service"] = "google_slides"
-            else:
-                enriched["service"] = "resource"
+        enriched["service"] = resource_type or "resource"
 
     elif step_type == "milestone":
-        if source_url:
-            enriched["source_url"] = source_url
-            if "kahoot" in str(source_url):
-                enriched["service"] = "kahoot"
-            else:
-                enriched["service"] = "milestone"
+        enriched["service"] = resource_type or "milestone"
 
     elif step_type == "event_attendance":
         enriched["service"] = "event"

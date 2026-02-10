@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import UUID4, BaseModel, Field
 
@@ -7,7 +6,7 @@ from pydantic import UUID4, BaseModel, Field
 class RewardCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
-    type: Literal["badge", "points"]
+    type: str = Field(..., min_length=1, max_length=50)
     icon_url: str | None = None
     unlock_condition: dict = Field(default_factory=dict)
 
@@ -15,7 +14,7 @@ class RewardCreate(BaseModel):
 class RewardUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None
-    type: Literal["badge", "points"] | None = None
+    type: str | None = Field(None, min_length=1, max_length=50)
     icon_url: str | None = None
     unlock_condition: dict | None = None
 
