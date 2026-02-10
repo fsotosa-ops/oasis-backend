@@ -16,6 +16,7 @@ from services.analytics_service.api.v1.api import api_router as analytics_router
 from services.auth_service.api.v1.api import api_router as auth_router
 from services.gamification_service.api.v1.router import router as gamification_router
 from services.journey_service.api.v1.api import api_router as journey_router
+from services.resource_service.api.v1.router import router as resource_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("oasis.gateway")
@@ -52,6 +53,7 @@ app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(journey_router, prefix="/api/v1/journeys")
 app.include_router(analytics_router, prefix="/api/v1/analytics")
 app.include_router(gamification_router, prefix="/api/v1/gamification", tags=["Gamification"])
+app.include_router(resource_router, prefix="/api/v1/resources", tags=["Resources"])
 
 
 # ---------------------------------------------------------------------------
