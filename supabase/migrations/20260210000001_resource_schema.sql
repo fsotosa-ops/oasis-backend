@@ -193,4 +193,32 @@ GRANT SELECT ON ALL TABLES IN SCHEMA resources TO authenticated;
 GRANT INSERT, UPDATE ON resources.resource_consumptions TO authenticated;
 
 -- =============================================================================
+-- 7. EXPOSE SCHEMA TO POSTGREST
+-- =============================================================================
+-- PostgREST needs the schema in pgrst.db_schemas to accept
+-- requests with Accept-Profile: resources (used by db.schema("resources")).
+-- We read the current value and append 'resources' if not already present.
+DO $$
+DECLARE
+    current_schemas TEXT;
+BEGIN
+    SELECT INTO current_schemas current_setting('pgrst.db_schemas', true);
+
+    -- Default to 'public' if not set
+    IF current_schemas IS NULL OR current_schemas = '' THEN
+        current_schemas := 'public';
+    END IF;
+
+    -- Only add if not already present
+    IF current_schemas NOT LIKE '%resources%' THEN
+        EXECUTE format(
+            'ALTER ROLE authenticator SET pgrst.db_schemas TO %L',
+            current_schemas || ', resources'
+        );
+        NOTIFY pgrst, 'reload config';
+    END IF;
+END;
+$$;
+
+-- =============================================================================
 SELECT 'resources schema created successfully' AS status;
