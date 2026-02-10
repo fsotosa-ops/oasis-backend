@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, status
 
-from common.auth.security import AdminUser, OrgRoleRequired
+from common.auth.security import OrgRoleRequired
 from common.database.client import get_admin_client
 from common.exceptions import NotFoundError
 from services.resource_service.crud import resources as crud
@@ -50,7 +50,7 @@ async def list_resources_admin(
 async def create_resource(
     org_id: str,
     payload: ResourceCreate,
-    _admin: AdminUser,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.create_resource(db, org_id, payload)
@@ -83,7 +83,7 @@ async def update_resource(
     org_id: str,
     resource_id: UUID,
     payload: ResourceUpdate,
-    _admin: AdminUser,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     updated = await crud.update_resource(db, resource_id, payload)
@@ -99,7 +99,7 @@ async def update_resource(
 async def delete_resource(
     org_id: str,
     resource_id: UUID,
-    _admin: AdminUser,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     deleted = await crud.delete_resource(db, resource_id)
@@ -116,7 +116,7 @@ async def delete_resource(
 async def publish_resource(
     org_id: str,
     resource_id: UUID,
-    _admin: AdminUser,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.publish_resource(db, resource_id)
@@ -133,7 +133,7 @@ async def publish_resource(
 async def unpublish_resource(
     org_id: str,
     resource_id: UUID,
-    _admin: AdminUser,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.unpublish_resource(db, resource_id)
@@ -151,7 +151,7 @@ async def upload_resource_file(
     org_id: str,
     resource_id: UUID,
     file: UploadFile = File(...),
-    _admin: AdminUser = None,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.get_resource_admin(db, resource_id)

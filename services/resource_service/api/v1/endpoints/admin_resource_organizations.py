@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from common.auth.security import AdminUser
+from common.auth.security import AdminUser, CurrentUser
 from common.database.client import get_admin_client
 from common.exceptions import NotFoundError, ValidationError
 from services.resource_service.crud import resource_organizations as ro_crud
@@ -24,7 +24,7 @@ router = APIRouter()
 )
 async def list_resource_organizations(
     resource_id: UUID,
-    _admin: AdminUser,
+    _user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.get_resource_admin(db, resource_id)
@@ -48,7 +48,7 @@ async def list_resource_organizations(
 async def assign_resource_to_organizations(
     resource_id: UUID,
     payload: ResourceOrganizationAssign,
-    _admin: AdminUser,
+    admin: AdminUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.get_resource_admin(db, resource_id)
@@ -59,7 +59,7 @@ async def assign_resource_to_organizations(
         db,
         resource_id,
         payload.organization_ids,
-        assigned_by=_admin.id,
+        assigned_by=admin.id,
     )
 
     orgs = await ro_crud.get_assigned_orgs(db, resource_id)
@@ -78,7 +78,7 @@ async def assign_resource_to_organizations(
 async def unassign_resource_from_organizations(
     resource_id: UUID,
     payload: ResourceOrganizationUnassign,
-    _admin: AdminUser,
+    _admin: AdminUser,  # cross-org operation: platform admin only
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     resource = await crud.get_resource_admin(db, resource_id)
