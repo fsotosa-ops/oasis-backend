@@ -12,13 +12,26 @@ async def list_resources_admin(
     skip: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict], int]:
+    # Get resource IDs assigned to this org via resource_organizations
+    ro_resp = (
+        await db.schema("resources").table("resource_organizations")
+        .select("resource_id")
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    assigned_ids = [r["resource_id"] for r in (ro_resp.data or [])]
+
+    # Build filter: owned by org OR assigned to org
+    if assigned_ids:
+        ids_csv = ",".join(assigned_ids)
+        or_filter = f"organization_id.eq.{org_id},id.in.({ids_csv})"
+    else:
+        or_filter = f"organization_id.eq.{org_id}"
+
     query = (
         db.schema("resources").table("resources")
         .select("*", count="exact")
-        .or_(
-            f"organization_id.eq.{org_id},"
-            f"id.in.(SELECT resource_id FROM resources.resource_organizations WHERE organization_id='{org_id}')"
-        )
+        .or_(or_filter)
         .order("created_at", desc=True)
         .range(skip, skip + limit - 1)
     )
@@ -226,14 +239,28 @@ async def list_resources_for_user(
         return []
 
     org_filter = ",".join(user_org_ids)
+
+    # Get resource IDs assigned to user's orgs via resource_organizations
+    ro_resp = (
+        await db.schema("resources").table("resource_organizations")
+        .select("resource_id")
+        .in_("organization_id", user_org_ids)
+        .execute()
+    )
+    assigned_ids = list({r["resource_id"] for r in (ro_resp.data or [])})
+
+    # Build filter: owned by user's orgs OR assigned to user's orgs
+    if assigned_ids:
+        ids_csv = ",".join(assigned_ids)
+        or_filter = f"organization_id.in.({org_filter}),id.in.({ids_csv})"
+    else:
+        or_filter = f"organization_id.in.({org_filter})"
+
     response = (
         await db.schema("resources").table("resources")
         .select("*")
         .eq("is_published", True)
-        .or_(
-            f"organization_id.in.({org_filter}),"
-            f"id.in.(SELECT resource_id FROM resources.resource_organizations WHERE organization_id IN ({org_filter}))"
-        )
+        .or_(or_filter)
         .order("created_at", desc=True)
         .execute()
     )
