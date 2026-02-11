@@ -2,12 +2,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from common.auth.security import get_current_user
 from common.database.client import get_admin_client
-from common.exceptions import NotFoundError
+from common.exceptions import ForbiddenError, NotFoundError
 from services.crm_service.crud import contacts as crud_contacts
 from services.crm_service.crud import notes as crud_notes
 from services.crm_service.crud import tasks as crud_tasks
+from services.crm_service.dependencies import (
+    CrmContext,
+    CrmGlobalReadAccess,
+    CrmReadAccess,
+    CrmWriteAccess,
+)
 from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
@@ -18,16 +23,15 @@ router = APIRouter()
 
 @router.get("/", response_model=list[ContactResponse])
 async def list_contacts(
-    organization_id: UUID | None = Query(None),
     search: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     contacts, _ = await crud_contacts.get_contacts(
         db=db,
-        organization_id=str(organization_id) if organization_id else None,
+        organization_id=ctx.organization_id,
         search=search,
         limit=limit,
         offset=skip,
@@ -38,12 +42,21 @@ async def list_contacts(
 @router.get("/{contact_id}", response_model=ContactResponse)
 async def get_contact(
     contact_id: UUID,
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     contact = await crud_contacts.get_contact_by_id(db, str(contact_id))
     if not contact:
         raise NotFoundError("Contact")
+
+    # Si hay org_id, verificar que el contacto pertenece a esa org
+    if ctx.organization_id:
+        belongs = await crud_contacts.contact_belongs_to_org(
+            db, str(contact_id), ctx.organization_id
+        )
+        if not belongs:
+            raise ForbiddenError("El contacto no pertenece a tu organización")
+
     return contact
 
 
@@ -51,9 +64,16 @@ async def get_contact(
 async def update_contact(
     contact_id: UUID,
     data: ContactUpdate,
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmWriteAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
+    # Verificar que el contacto pertenece a la org
+    belongs = await crud_contacts.contact_belongs_to_org(
+        db, str(contact_id), ctx.organization_id
+    )
+    if not belongs:
+        raise ForbiddenError("El contacto no pertenece a tu organización")
+
     updated = await crud_contacts.update_contact(db, str(contact_id), data)
     if not updated:
         raise NotFoundError("Contact")
@@ -70,12 +90,11 @@ async def update_contact(
 )
 async def list_contact_notes(
     contact_id: UUID,
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     return await crud_notes.get_notes_for_contact(
-        db, str(contact_id), str(organization_id)
+        db, str(contact_id), ctx.organization_id
     )
 
 
@@ -88,15 +107,14 @@ async def list_contact_notes(
 async def create_contact_note(
     contact_id: UUID,
     note_in: NoteCreate,
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     return await crud_notes.create_note(
         db,
         contact_user_id=str(contact_id),
-        organization_id=str(organization_id),
-        author_id=str(user.id),
+        organization_id=ctx.organization_id,
+        author_id=ctx.user_id,
         note_in=note_in,
     )
 
@@ -111,12 +129,11 @@ async def create_contact_note(
 )
 async def list_contact_tasks(
     contact_id: UUID,
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     return await crud_tasks.get_tasks_for_contact(
-        db, str(contact_id), str(organization_id)
+        db, str(contact_id), ctx.organization_id
     )
 
 
@@ -129,15 +146,14 @@ async def list_contact_tasks(
 async def create_contact_task(
     contact_id: UUID,
     task_in: TaskCreate,
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     return await crud_tasks.create_task(
         db,
         contact_user_id=str(contact_id),
-        organization_id=str(organization_id),
-        creator_id=str(user.id),
+        organization_id=ctx.organization_id,
+        creator_id=ctx.user_id,
         task_in=task_in,
     )
 
@@ -151,15 +167,14 @@ async def create_contact_task(
 )
 async def get_contact_timeline(
     contact_id: UUID,
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     notes = await crud_notes.get_notes_for_contact(
-        db, str(contact_id), str(organization_id)
+        db, str(contact_id), ctx.organization_id
     )
     tasks = await crud_tasks.get_tasks_for_contact(
-        db, str(contact_id), str(organization_id)
+        db, str(contact_id), ctx.organization_id
     )
 
     timeline = []

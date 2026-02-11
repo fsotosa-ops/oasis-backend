@@ -1,9 +1,7 @@
-from uuid import UUID
+from fastapi import APIRouter, Depends
 
-from fastapi import APIRouter, Depends, Query
-
-from common.auth.security import get_current_user
 from common.database.client import get_admin_client
+from services.crm_service.dependencies import CrmContext, CrmReadAccess
 from supabase import AsyncClient
 
 router = APIRouter()
@@ -11,11 +9,10 @@ router = APIRouter()
 
 @router.get("/", summary="Metricas agregadas del CRM")
 async def get_crm_stats(
-    organization_id: UUID = Query(...),
-    user=Depends(get_current_user),  # noqa: B008
+    ctx: CrmContext = Depends(CrmReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    org_id = str(organization_id)
+    org_id = ctx.organization_id
 
     # Count contacts in org
     members_resp = (

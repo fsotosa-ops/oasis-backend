@@ -52,6 +52,22 @@ async def get_contact_by_id(db: AsyncClient, user_id: str) -> Optional[dict]:
     return result.data
 
 
+async def contact_belongs_to_org(
+    db: AsyncClient, user_id: str, organization_id: str
+) -> bool:
+    """Verifica que el contacto (user_id) sea miembro activo de la organización."""
+    resp = (
+        await db.table("organization_members")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("organization_id", organization_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 async def update_contact(db: AsyncClient, user_id: str, data: ContactUpdate) -> Optional[dict]:
     update_data = data.model_dump(exclude_unset=True)
     if not update_data:
