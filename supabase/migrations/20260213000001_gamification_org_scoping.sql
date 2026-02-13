@@ -108,6 +108,9 @@ GRANT EXECUTE ON FUNCTION journeys.get_user_total_points(UUID, UUID) TO service_
 -- 5. UPDATE get_user_current_level() to use new get_user_total_points sig
 -- =============================================================================
 
+-- Must DROP first: original returns TABLE(...), new returns JSONB
+DROP FUNCTION IF EXISTS journeys.get_user_current_level(UUID, UUID);
+
 CREATE OR REPLACE FUNCTION journeys.get_user_current_level(uid UUID, org_id UUID)
 RETURNS JSONB
 LANGUAGE SQL
