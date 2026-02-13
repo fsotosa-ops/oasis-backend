@@ -135,3 +135,6 @@ CrmWriteAccess = CrmOrgAccess("admin", "owner", org_required=True)
 
 # Global read: facilitador, admin, owner — org opcional (platform admins ven todo)
 CrmGlobalReadAccess = CrmOrgAccess("facilitador", "admin", "owner", org_required=False)
+
+# Global write: admin, owner — org opcional (platform admins editan cualquier contacto sin org)
+CrmGlobalWriteAccess = CrmOrgAccess("admin", "owner", org_required=False, write=True)
