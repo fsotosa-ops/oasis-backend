@@ -5,65 +5,10 @@ from supabase import AsyncClient
 from ..schemas.contacts import ContactUpdate
 
 
-async def _enrich_contacts_with_orgs(
-    db: AsyncClient, contacts: list[dict]
-) -> list[dict]:
-    """Enrich contacts with organization memberships and profile data."""
-    if not contacts:
-        return contacts
-
-    user_ids = [c["user_id"] for c in contacts]
-
-    # Fetch org memberships for all contacts in one query
-    memberships_resp = (
-        await db.table("organization_members")
-        .select("user_id, organization_id, role, status, joined_at, organizations(name, slug)")
-        .in_("user_id", user_ids)
-        .execute()
-    )
-
-    # Fetch profile data (full_name, is_platform_admin) for all contacts
-    profiles_resp = (
-        await db.table("profiles")
-        .select("id, full_name, is_platform_admin")
-        .in_("id", user_ids)
-        .execute()
-    )
-
-    # Build lookup maps
-    memberships_by_user: dict[str, list[dict]] = {}
-    for m in (memberships_resp.data or []):
-        uid = m["user_id"]
-        org = m.get("organizations") or {}
-        memberships_by_user.setdefault(uid, []).append({
-            "organization_id": m["organization_id"],
-            "organization_name": org.get("name"),
-            "organization_slug": org.get("slug"),
-            "role": m["role"],
-            "status": m["status"],
-            "joined_at": m.get("joined_at"),
-        })
-
-    profiles_by_id: dict[str, dict] = {}
-    for p in (profiles_resp.data or []):
-        profiles_by_id[p["id"]] = p
-
-    # Enrich each contact
-    for contact in contacts:
-        uid = contact["user_id"]
-        contact["organizations"] = memberships_by_user.get(uid, [])
-        profile = profiles_by_id.get(uid, {})
-        contact["full_name"] = profile.get("full_name")
-        contact["is_platform_admin"] = profile.get("is_platform_admin", False)
-
-    return contacts
-
-
 async def get_contacts(
     db: AsyncClient,
     organization_id: Optional[str] = None,
     search: Optional[str] = None,
-    status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
@@ -90,19 +35,9 @@ async def get_contacts(
             f"last_name.ilike.%{search}%"
         )
 
-    if status:
-        query = query.eq("status", status)
-
     query = query.order("last_seen_at", desc=True).range(offset, offset + limit - 1)
     result = await query.execute()
-
-    contacts = result.data or []
-    total = result.count or 0
-
-    # Enrich with org memberships and profile data
-    contacts = await _enrich_contacts_with_orgs(db, contacts)
-
-    return contacts, total
+    return result.data or [], result.count or 0
 
 
 async def get_contact_by_id(db: AsyncClient, user_id: str) -> Optional[dict]:
@@ -114,11 +49,7 @@ async def get_contact_by_id(db: AsyncClient, user_id: str) -> Optional[dict]:
         .single()
         .execute()
     )
-    if not result.data:
-        return None
-
-    enriched = await _enrich_contacts_with_orgs(db, [result.data])
-    return enriched[0]
+    return result.data
 
 
 async def contact_belongs_to_org(
@@ -137,10 +68,26 @@ async def contact_belongs_to_org(
     return bool(resp.data)
 
 
-async def update_contact(db: AsyncClient, user_id: str, data: ContactUpdate) -> Optional[dict]:
+async def update_contact(
+    db: AsyncClient,
+    user_id: str,
+    data: ContactUpdate,
+    changed_by: Optional[str] = None,
+) -> Optional[dict]:
     update_data = data.model_dump(exclude_unset=True)
     if not update_data:
         return await get_contact_by_id(db, user_id)
+
+    # Set session var so the Postgres trigger knows who made the change.
+    # set_config is a built-in Postgres function exposed by PostgREST.
+    if changed_by:
+        try:
+            await db.rpc(
+                "set_config",
+                {"setting": "app.acting_user_id", "value": changed_by, "is_local": True},
+            ).execute()
+        except Exception:
+            pass  # non-critical; trigger falls back to auth.uid()
 
     result = (
         await db.schema("crm")
@@ -149,8 +96,4 @@ async def update_contact(db: AsyncClient, user_id: str, data: ContactUpdate) -> 
         .eq("user_id", user_id)
         .execute()
     )
-    if not result.data:
-        return None
-
-    enriched = await _enrich_contacts_with_orgs(db, [result.data[0]])
-    return enriched[0]
+    return result.data[0] if result.data else None

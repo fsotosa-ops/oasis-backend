@@ -10,6 +10,7 @@ from services.crm_service.crud import tasks as crud_tasks
 from services.crm_service.dependencies import (
     CrmContext,
     CrmGlobalReadAccess,
+    CrmGlobalWriteAccess,
     CrmReadAccess,
     CrmWriteAccess,
 )
@@ -64,17 +65,22 @@ async def get_contact(
 async def update_contact(
     contact_id: UUID,
     data: ContactUpdate,
-    ctx: CrmContext = Depends(CrmWriteAccess),  # noqa: B008
+    ctx: CrmContext = Depends(CrmGlobalWriteAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    # Verificar que el contacto pertenece a la org
-    belongs = await crud_contacts.contact_belongs_to_org(
-        db, str(contact_id), ctx.organization_id
-    )
-    if not belongs:
-        raise ForbiddenError("El contacto no pertenece a tu organización")
+    # Platform admins pueden actualizar cualquier contacto sin org_id
+    if ctx.organization_id:
+        belongs = await crud_contacts.contact_belongs_to_org(
+            db, str(contact_id), ctx.organization_id
+        )
+        if not belongs:
+            raise ForbiddenError("El contacto no pertenece a tu organización")
+    elif not ctx.is_platform_admin:
+        raise ForbiddenError("organization_id es requerido")
 
-    updated = await crud_contacts.update_contact(db, str(contact_id), data)
+    updated = await crud_contacts.update_contact(
+        db, str(contact_id), data, changed_by=ctx.user_id,
+    )
     if not updated:
         raise NotFoundError("Contact")
     return updated
@@ -185,3 +191,28 @@ async def get_contact_timeline(
 
     timeline.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return timeline
+
+
+# ---------------------------------------------------------------------------
+# Change history (audit trail)
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{contact_id}/changes",
+    summary="Historial de cambios de un contacto",
+)
+async def get_contact_changes(
+    contact_id: UUID,
+    limit: int = Query(50, ge=1, le=200),
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    query = (
+        db.schema("crm")
+        .table("contact_changes")
+        .select("*")
+        .eq("contact_user_id", str(contact_id))
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    result = await query.execute()
+    return result.data or []
