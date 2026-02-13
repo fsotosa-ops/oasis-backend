@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from services.journey_service.schemas.journeys import StepCreate, StepUpdate
+from services.journey_service.schemas.journeys import StepCreate, StepUpdate, clean_config_for_type
 from supabase import AsyncClient
 
 
@@ -33,7 +33,7 @@ async def create_step(
         "title": step.title,
         "type": step.type,
         "order_index": order_index,
-        "config": step.config,
+        "config": clean_config_for_type(step.type, step.config),
         "gamification_rules": step.gamification_rules.model_dump(),
     }
 
@@ -66,6 +66,23 @@ async def update_step(
             .execute()
         )
         return response.data
+
+    # Clean config against the step type when config or type is being updated
+    if "config" in payload or "type" in payload:
+        # Determine effective type: use incoming type, or fetch current from DB
+        effective_type = payload.get("type")
+        if not effective_type:
+            current = (
+                await db.schema("journeys").table("steps")
+                .select("type")
+                .eq("id", str(step_id))
+                .single()
+                .execute()
+            )
+            effective_type = current.data["type"] if current.data else None
+
+        if effective_type and "config" in payload:
+            payload["config"] = clean_config_for_type(effective_type, payload["config"])
 
     response = (
         await db.schema("journeys").table("steps")

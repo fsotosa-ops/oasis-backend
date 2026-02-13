@@ -21,6 +21,73 @@ class GamificationRules(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Per-type config schemas
+# ---------------------------------------------------------------------------
+class ResourceConfig(BaseModel):
+    type: str
+    source_url: str
+    embed_url: str | None = None
+
+
+class SurveyConfig(BaseModel):
+    description: str | None = None
+    resource: ResourceConfig | None = None
+    form_url: str | None = None  # legacy
+
+
+class ContentViewConfig(BaseModel):
+    description: str | None = None
+    resource: ResourceConfig | None = None
+    video_url: str | None = None  # legacy
+
+
+class ResourceConsumptionConfig(BaseModel):
+    description: str | None = None
+    resource: ResourceConfig | None = None
+    url: str | None = None  # legacy
+
+
+class MilestoneConfig(BaseModel):
+    description: str | None = None
+    resource: ResourceConfig | None = None
+    url: str | None = None  # legacy
+
+
+class EventAttendanceConfig(BaseModel):
+    description: str | None = None
+
+
+class SocialInteractionConfig(BaseModel):
+    description: str | None = None
+
+
+_STEP_CONFIG_SCHEMAS: dict[str, type[BaseModel]] = {
+    "survey": SurveyConfig,
+    "content_view": ContentViewConfig,
+    "resource_consumption": ResourceConsumptionConfig,
+    "milestone": MilestoneConfig,
+    "event_attendance": EventAttendanceConfig,
+    "social_interaction": SocialInteractionConfig,
+}
+
+
+def clean_config_for_type(step_type: str, config: dict[str, Any] | None) -> dict[str, Any]:
+    """Parse config through the type-specific schema, stripping unknown keys."""
+    if not config:
+        return {}
+    schema_cls = _STEP_CONFIG_SCHEMAS.get(step_type)
+    if not schema_cls:
+        return config  # unknown type — pass through
+    try:
+        parsed = schema_cls.model_validate(config)
+        return parsed.model_dump(exclude_none=True)
+    except Exception:
+        # Validation failed — preserve only description
+        desc = config.get("description")
+        return {"description": desc} if desc else {}
+
+
+# ---------------------------------------------------------------------------
 # Step schemas
 # ---------------------------------------------------------------------------
 class StepBase(BaseModel):
