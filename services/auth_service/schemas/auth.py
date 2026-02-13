@@ -111,6 +111,14 @@ class OAuthUrlResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Organization schemas
 # ---------------------------------------------------------------------------
+class AdminUserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    is_platform_admin: bool = False
+
+
 class AdminUserUpdate(BaseModel):
     is_platform_admin: bool
 

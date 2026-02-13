@@ -23,6 +23,11 @@ class ContactResponse(ContactBase):
     
     # Optional fields populated via joins or aggregation
     oasis_score: Optional[int] = 0
-    
+
     class Config:
         from_attributes = True
+
+
+class PaginatedContactsResponse(BaseModel):
+    contacts: List[ContactResponse]
+    count: int
