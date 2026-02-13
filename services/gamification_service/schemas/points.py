@@ -11,6 +11,7 @@ class ActivityRead(BaseModel):
     user_id: UUID4
     type: str
     points_awarded: int = 0
+    organization_id: UUID4 | None = None
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
 
@@ -24,6 +25,7 @@ class PointsLedgerRead(BaseModel):
     amount: int
     reason: str
     reference_id: UUID4 | None = None
+    organization_id: UUID4 | None = None
     created_at: datetime
 
     class Config:

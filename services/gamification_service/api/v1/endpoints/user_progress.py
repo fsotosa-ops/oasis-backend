@@ -18,16 +18,20 @@ from services.gamification_service.schemas.rewards import UserRewardRead
 router = APIRouter()
 
 
-async def _get_user_level(db: AsyncClient, user_id: UUID, total_points: int) -> tuple[dict | None, dict | None]:
-    """Get current and next level for user based on total points.
-    Searches across all orgs (global + org-specific levels)."""
-    response = (
-        await db.schema("journeys").table("levels")
-        .select("*")
-        .order("min_points")
-        .execute()
-    )
-    all_levels = response.data or []
+async def _get_user_level(
+    db: AsyncClient, user_id: UUID, total_points: int, org_id: UUID | None = None
+) -> tuple[dict | None, dict | None]:
+    """Get current and next level for user based on total points."""
+    if org_id:
+        all_levels = await levels_crud.list_levels(db, org_id)
+    else:
+        response = (
+            await db.schema("journeys").table("levels")
+            .select("*")
+            .order("min_points")
+            .execute()
+        )
+        all_levels = response.data or []
 
     current_level = None
     next_level = None
@@ -50,13 +54,15 @@ async def _get_user_level(db: AsyncClient, user_id: UUID, total_points: int) -> 
 async def get_user_summary(
     current_user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(default=None, description="Filter by organization"),
 ):
     user_id = UUID(str(current_user.id))
+    parsed_org = UUID(org_id) if org_id else None
 
-    total_points = await points_crud.get_user_total_points(db, user_id)
-    current_level, next_level = await _get_user_level(db, user_id, total_points)
+    total_points = await points_crud.get_user_total_points(db, user_id, parsed_org)
+    current_level, next_level = await _get_user_level(db, user_id, total_points, parsed_org)
     rewards = await user_rewards_crud.get_user_rewards(db, user_id)
-    activities = await points_crud.get_user_activities(db, user_id, limit=10)
+    activities = await points_crud.get_user_activities(db, user_id, parsed_org, limit=10)
 
     points_to_next = None
     if next_level:
@@ -80,9 +86,11 @@ async def get_user_summary(
 async def get_user_points(
     current_user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(default=None, description="Filter by organization"),
 ):
     user_id = UUID(str(current_user.id))
-    return await points_crud.get_user_total_points(db, user_id)
+    parsed_org = UUID(org_id) if org_id else None
+    return await points_crud.get_user_total_points(db, user_id, parsed_org)
 
 
 @router.get(
@@ -106,10 +114,12 @@ async def get_user_rewards(
 async def get_user_activities(
     current_user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(default=None, description="Filter by organization"),
     limit: int = Query(default=20, ge=1, le=100),
 ):
     user_id = UUID(str(current_user.id))
-    return await points_crud.get_user_activities(db, user_id, limit=limit)
+    parsed_org = UUID(org_id) if org_id else None
+    return await points_crud.get_user_activities(db, user_id, parsed_org, limit=limit)
 
 
 @router.get(
@@ -120,7 +130,9 @@ async def get_user_activities(
 async def get_user_ledger(
     current_user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(default=None, description="Filter by organization"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     user_id = UUID(str(current_user.id))
-    return await points_crud.get_user_points_ledger(db, user_id, limit=limit)
+    parsed_org = UUID(org_id) if org_id else None
+    return await points_crud.get_user_points_ledger(db, user_id, parsed_org, limit=limit)
