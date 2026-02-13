@@ -169,10 +169,11 @@ class AuthManager:
         limit: int = 50,
         search: Optional[str] = None,
     ) -> tuple[list[dict], int]:
-        """Lista todos los usuarios via admin client (bypassa RLS)."""
+        """Lista todos los usuarios via admin client (bypassa RLS), incluye membresías."""
         admin = await get_admin_client()
         query = admin.table("profiles").select(
-            "id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at",
+            "id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at, "
+            "organization_members(id, organization_id, role, status, joined_at, organizations(name, slug))",
             count="exact",
         )
         if search:
@@ -180,7 +181,27 @@ class AuthManager:
             query = query.or_(f"email.ilike.{pattern},full_name.ilike.{pattern}")
         query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
         response = await query.execute()
-        return response.data, response.count
+
+        # Transformar organization_members anidados al formato OrgMembership
+        users = []
+        for row in (response.data or []):
+            raw_members = row.pop("organization_members", []) or []
+            memberships = []
+            for m in raw_members:
+                org = m.get("organizations") or {}
+                memberships.append({
+                    "id": m["id"],
+                    "organization_id": m["organization_id"],
+                    "role": m["role"],
+                    "status": m["status"],
+                    "joined_at": m.get("joined_at"),
+                    "organization_name": org.get("name"),
+                    "organization_slug": org.get("slug"),
+                })
+            row["organizations"] = memberships
+            users.append(row)
+
+        return users, response.count
 
     @staticmethod
     async def set_platform_admin(user_id: str, is_admin: bool) -> dict:
@@ -233,6 +254,44 @@ class AuthManager:
             )
 
         # 3. Re-fetch para devolver el perfil actualizado
+        profile_resp = (
+            await admin.table("profiles")
+            .select("id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        return profile_resp.data
+
+    @staticmethod
+    async def admin_create_user(data) -> dict:
+        """Crea un usuario desde el panel de admin (sin pasar por sign_up público)."""
+        admin = await get_admin_client()
+
+        # 1. Crear usuario en auth.users via admin API
+        res = await admin.auth.admin.create_user({
+            "email": data.email,
+            "password": data.password,
+            "email_confirm": True,
+            "user_metadata": {
+                "full_name": data.full_name,
+                "avatar_url": data.avatar_url,
+                "is_platform_admin": data.is_platform_admin,
+            },
+        })
+        user_id = str(res.user.id)
+
+        # 2. Si is_platform_admin, sincronizar con profiles
+        if data.is_platform_admin:
+            try:
+                await admin.rpc("admin_update_profile", {
+                    "p_user_id": user_id,
+                    "p_is_platform_admin": True,
+                }).execute()
+            except Exception:
+                logger.warning("No se pudo actualizar is_platform_admin en profiles", exc_info=True)
+
+        # 3. Fetch y devolver el perfil creado
         profile_resp = (
             await admin.table("profiles")
             .select("id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at")

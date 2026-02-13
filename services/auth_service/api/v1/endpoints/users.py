@@ -4,6 +4,7 @@ from common.auth.security import AdminUser, CurrentUser, get_current_token
 from common.exceptions import OasisException
 from services.auth_service.logic.manager import AuthManager
 from services.auth_service.schemas.auth import (
+    AdminUserCreate,
     AdminUserProfileUpdate,
     AdminUserUpdate,
     PaginatedUsersResponse,
@@ -12,6 +13,16 @@ from services.auth_service.schemas.auth import (
 )
 
 router = APIRouter()
+
+
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def admin_create_user(
+    data: AdminUserCreate,
+    admin: AdminUser,
+):
+    """Crea un usuario nuevo desde el panel de admin."""
+    profile = await AuthManager.admin_create_user(data)
+    return profile
 
 
 @router.get("/", response_model=PaginatedUsersResponse)

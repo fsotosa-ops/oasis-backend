@@ -13,7 +13,7 @@ from services.crm_service.dependencies import (
     CrmReadAccess,
     CrmWriteAccess,
 )
-from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate
+from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate, PaginatedContactsResponse
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from supabase import AsyncClient
@@ -21,7 +21,7 @@ from supabase import AsyncClient
 router = APIRouter()
 
 
-@router.get("/", response_model=list[ContactResponse])
+@router.get("/", response_model=PaginatedContactsResponse)
 async def list_contacts(
     search: str | None = Query(None),
     skip: int = Query(0, ge=0),
@@ -29,14 +29,14 @@ async def list_contacts(
     ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    contacts, _ = await crud_contacts.get_contacts(
+    contacts, count = await crud_contacts.get_contacts(
         db=db,
         organization_id=ctx.organization_id,
         search=search,
         limit=limit,
         offset=skip,
     )
-    return contacts
+    return {"contacts": contacts, "count": count}
 
 
 @router.get("/{contact_id}", response_model=ContactResponse)
