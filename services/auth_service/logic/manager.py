@@ -171,9 +171,10 @@ class AuthManager:
     ) -> tuple[list[dict], int]:
         """Lista todos los usuarios via admin client (bypassa RLS), incluye membresías."""
         admin = await get_admin_client()
+
+        # 1. Fetch profiles (paginated)
         query = admin.table("profiles").select(
-            "id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at, "
-            "organization_members(id, organization_id, role, status, joined_at, organizations(name, slug))",
+            "id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at",
             count="exact",
         )
         if search:
@@ -182,26 +183,40 @@ class AuthManager:
         query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
         response = await query.execute()
 
-        # Transformar organization_members anidados al formato OrgMembership
-        users = []
-        for row in (response.data or []):
-            raw_members = row.pop("organization_members", []) or []
-            memberships = []
-            for m in raw_members:
-                org = m.get("organizations") or {}
-                memberships.append({
-                    "id": m["id"],
-                    "organization_id": m["organization_id"],
-                    "role": m["role"],
-                    "status": m["status"],
-                    "joined_at": m.get("joined_at"),
-                    "organization_name": org.get("name"),
-                    "organization_slug": org.get("slug"),
-                })
-            row["organizations"] = memberships
-            users.append(row)
+        profiles = response.data or []
+        if not profiles:
+            return [], response.count or 0
 
-        return users, response.count
+        # 2. Batch-fetch org memberships for these user IDs
+        user_ids = [p["id"] for p in profiles]
+        members_resp = (
+            await admin.table("organization_members")
+            .select("id, user_id, organization_id, role, status, joined_at, organizations(name, slug)")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+
+        # Index memberships by user_id
+        memberships_by_user: dict[str, list[dict]] = {}
+        for m in (members_resp.data or []):
+            uid = m["user_id"]
+            org = m.get("organizations") or {}
+            entry = {
+                "id": m["id"],
+                "organization_id": m["organization_id"],
+                "role": m["role"],
+                "status": m["status"],
+                "joined_at": m.get("joined_at"),
+                "organization_name": org.get("name"),
+                "organization_slug": org.get("slug"),
+            }
+            memberships_by_user.setdefault(uid, []).append(entry)
+
+        # 3. Merge
+        for p in profiles:
+            p["organizations"] = memberships_by_user.get(p["id"], [])
+
+        return profiles, response.count
 
     @staticmethod
     async def set_platform_admin(user_id: str, is_admin: bool) -> dict:
