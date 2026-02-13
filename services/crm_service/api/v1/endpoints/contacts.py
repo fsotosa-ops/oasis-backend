@@ -78,7 +78,9 @@ async def update_contact(
     elif not ctx.is_platform_admin:
         raise ForbiddenError("organization_id es requerido")
 
-    updated = await crud_contacts.update_contact(db, str(contact_id), data)
+    updated = await crud_contacts.update_contact(
+        db, str(contact_id), data, changed_by=ctx.user_id,
+    )
     if not updated:
         raise NotFoundError("Contact")
     return updated
@@ -189,3 +191,28 @@ async def get_contact_timeline(
 
     timeline.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return timeline
+
+
+# ---------------------------------------------------------------------------
+# Change history (audit trail)
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{contact_id}/changes",
+    summary="Historial de cambios de un contacto",
+)
+async def get_contact_changes(
+    contact_id: UUID,
+    limit: int = Query(50, ge=1, le=200),
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    query = (
+        db.schema("crm")
+        .table("contact_changes")
+        .select("*")
+        .eq("contact_user_id", str(contact_id))
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    result = await query.execute()
+    return result.data or []

@@ -68,10 +68,26 @@ async def contact_belongs_to_org(
     return bool(resp.data)
 
 
-async def update_contact(db: AsyncClient, user_id: str, data: ContactUpdate) -> Optional[dict]:
+async def update_contact(
+    db: AsyncClient,
+    user_id: str,
+    data: ContactUpdate,
+    changed_by: Optional[str] = None,
+) -> Optional[dict]:
     update_data = data.model_dump(exclude_unset=True)
     if not update_data:
         return await get_contact_by_id(db, user_id)
+
+    # Set session var so the Postgres trigger knows who made the change.
+    # set_config is a built-in Postgres function exposed by PostgREST.
+    if changed_by:
+        try:
+            await db.rpc(
+                "set_config",
+                {"setting": "app.acting_user_id", "value": changed_by, "is_local": True},
+            ).execute()
+        except Exception:
+            pass  # non-critical; trigger falls back to auth.uid()
 
     result = (
         await db.schema("crm")
