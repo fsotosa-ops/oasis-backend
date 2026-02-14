@@ -164,6 +164,41 @@ class AuthManager:
         return res.user
 
     @staticmethod
+    async def get_user_by_admin(user_id: str) -> dict:
+        """Obtiene un usuario por ID via admin client (bypassa RLS), incluye membresías."""
+        admin = await get_admin_client()
+
+        response = (
+            await admin.table("profiles")
+            .select("id, email, full_name, avatar_url, is_platform_admin, status, created_at, updated_at")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        profile = response.data
+
+        members_resp = (
+            await admin.table("organization_members")
+            .select("id, organization_id, role, status, joined_at, organizations(name, slug)")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        orgs = []
+        for m in (members_resp.data or []):
+            org = m.get("organizations") or {}
+            orgs.append({
+                "id": m["id"],
+                "organization_id": m["organization_id"],
+                "role": m["role"],
+                "status": m["status"],
+                "joined_at": m.get("joined_at"),
+                "organization_name": org.get("name"),
+                "organization_slug": org.get("slug"),
+            })
+        profile["organizations"] = orgs
+        return profile
+
+    @staticmethod
     async def list_all_users(
         offset: int = 0,
         limit: int = 50,

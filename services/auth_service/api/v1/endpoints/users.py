@@ -37,6 +37,16 @@ async def list_users(
     return {"users": users, "count": count}
 
 
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user_by_admin(
+    user_id: str,
+    admin: AdminUser,
+):
+    """Obtiene un usuario por ID (solo platform admin)."""
+    profile = await AuthManager.get_user_by_admin(user_id)
+    return profile
+
+
 @router.patch("/{user_id}/admin", response_model=UserResponse)
 async def set_platform_admin(
     user_id: str,

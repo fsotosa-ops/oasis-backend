@@ -17,6 +17,7 @@ class ContactBase(BaseModel):
     gender: Optional[str] = None
     education_level: Optional[str] = None
     occupation: Optional[str] = None
+    company: Optional[str] = None
     status: Optional[str] = "active"
 
 
