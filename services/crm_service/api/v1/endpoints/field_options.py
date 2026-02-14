@@ -18,9 +18,9 @@ router = APIRouter()
 
 @router.get("/", response_model=list[FieldOptionResponse])
 async def list_field_options(
+    _user: CurrentUser,
     field_name: str | None = Query(None, description="Filter by field name: gender, education_level, occupation"),
     include_inactive: bool = Query(False),
-    _user: CurrentUser = Depends(),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
     """Lista opciones de campos configurables. Accesible para todos los usuarios autenticados."""

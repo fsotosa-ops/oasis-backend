@@ -3,7 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN pip install --no-cache-dir poetry==1.8.5
+RUN pip install --no-cache-dir poetry==2.2.1
 
 WORKDIR /app
 
