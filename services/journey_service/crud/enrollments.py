@@ -58,18 +58,20 @@ async def get_user_enrollments(
     if not enrollments:
         return []
 
-    # Fetch organization_id for each journey
+    # Fetch organization_id and title for each journey
     journey_ids = list({e["journey_id"] for e in enrollments})
     journeys_response = (
         await db.schema("journeys").table("journeys")
-        .select("id, organization_id")
+        .select("id, organization_id, title")
         .in_("id", journey_ids)
         .execute()
     )
-    org_map = {j["id"]: j["organization_id"] for j in (journeys_response.data or [])}
+    journey_map = {j["id"]: j for j in (journeys_response.data or [])}
 
     for e in enrollments:
-        e["organization_id"] = org_map.get(e["journey_id"])
+        j = journey_map.get(e["journey_id"], {})
+        e["organization_id"] = j.get("organization_id")
+        e["journey_title"] = j.get("title")
 
     return enrollments
 

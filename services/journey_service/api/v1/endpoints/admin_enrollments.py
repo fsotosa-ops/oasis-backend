@@ -30,6 +30,7 @@ async def get_user_enrollments_admin(
             user_id=e["user_id"],
             journey_id=e["journey_id"],
             organization_id=e.get("organization_id"),
+            journey_title=e.get("journey_title"),
             status=e["status"],
             current_step_index=e["current_step_index"],
             progress_percentage=e.get("progress_percentage", 0.0),
