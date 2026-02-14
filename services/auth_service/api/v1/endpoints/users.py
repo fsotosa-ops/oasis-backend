@@ -37,6 +37,57 @@ async def list_users(
     return {"users": users, "count": count}
 
 
+# --- /me routes MUST come before /{user_id} to avoid "me" matching as UUID ---
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_my_profile(
+    user: CurrentUser,
+    token: str = Depends(get_current_token),
+):
+    """Retorna datos de la tabla profiles (no auth.users)."""
+    profile = await AuthManager.get_my_profile(token, str(user.id))
+    return profile
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_my_profile(
+    data: UserUpdate,
+    user: CurrentUser,
+    token: str = Depends(get_current_token),
+):
+    raw = data.model_dump(exclude_unset=True)
+
+    # Separar updates de auth (email/password) vs profile (full_name, avatar_url)
+    auth_payload = {}
+    if "email" in raw:
+        auth_payload["email"] = raw.pop("email")
+    if "password" in raw:
+        auth_payload["password"] = raw.pop("password")
+
+    # Update auth attributes si hay cambios
+    if auth_payload:
+        await AuthManager.update_my_user(token, str(user.id), auth_payload)
+
+    # Update profile attributes si hay cambios
+    profile_data = {}
+    if "full_name" in raw:
+        profile_data["full_name"] = raw["full_name"]
+    if "avatar_url" in raw:
+        profile_data["avatar_url"] = raw["avatar_url"]
+
+    if profile_data:
+        profile = await AuthManager.update_my_profile(token, profile_data)
+    else:
+        # Re-fetch para devolver datos actualizados
+        profile = await AuthManager.get_my_profile(token, str(user.id))
+
+    return profile
+
+
+# --- /{user_id} routes (admin only) ---
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user_by_admin(
     user_id: str,
@@ -87,52 +138,6 @@ async def update_user_by_admin(
         )
     profile = await AuthManager.update_user_by_admin(user_id, raw)
     return profile
-
-
-@router.get("/me", response_model=UserResponse)
-async def get_my_profile(
-    user: CurrentUser,
-    token: str = Depends(get_current_token),
-):
-    """Retorna datos de la tabla profiles (no auth.users)."""
-    profile = await AuthManager.get_my_profile(token, str(user.id))
-    return profile
-
-
-@router.patch("/me", response_model=UserResponse)
-async def update_my_profile(
-    data: UserUpdate,
-    user: CurrentUser,
-    token: str = Depends(get_current_token),
-):
-    raw = data.model_dump(exclude_unset=True)
-
-    # Separar updates de auth (email/password) vs profile (full_name, avatar_url)
-    auth_payload = {}
-    if "email" in raw:
-        auth_payload["email"] = raw.pop("email")
-    if "password" in raw:
-        auth_payload["password"] = raw.pop("password")
-
-    # Update auth attributes si hay cambios
-    if auth_payload:
-        await AuthManager.update_my_user(token, str(user.id), auth_payload)
-
-    # Update profile attributes si hay cambios
-    profile_data = {}
-    if "full_name" in raw:
-        profile_data["full_name"] = raw["full_name"]
-    if "avatar_url" in raw:
-        profile_data["avatar_url"] = raw["avatar_url"]
-
-    if profile_data:
-        profile = await AuthManager.update_my_profile(token, profile_data)
-    else:
-        # Re-fetch para devolver datos actualizados
-        profile = await AuthManager.get_my_profile(token, str(user.id))
-
-    return profile
-
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
