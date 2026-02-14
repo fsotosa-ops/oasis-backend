@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from supabase_auth.errors import AuthApiError
 from postgrest.exceptions import APIError as PostgRESTAPIError
@@ -38,6 +38,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Middleware: propagar X-Forwarded-Proto para que FastAPI genere URLs HTTPS
+# en redirects 307 (trailing slash) cuando esta detras de Cloud Run / proxy.
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def set_scheme_from_proxy(request: Request, call_next):
+    proto = request.headers.get("x-forwarded-proto")
+    if proto:
+        request.scope["scheme"] = proto
+    return await call_next(request)
+
 
 # ---------------------------------------------------------------------------
 # Exception handlers globales (aplican a todos los routers incluidos)
