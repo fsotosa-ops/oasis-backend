@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+from common.auth.security import CurrentUser
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.crm_service.crud import contacts as crud_contacts
@@ -59,6 +60,21 @@ async def get_contact(
             raise ForbiddenError("El contacto no pertenece a tu organización")
 
     return contact
+
+
+@router.patch("/me", response_model=ContactResponse)
+async def update_my_contact(
+    data: ContactUpdate,
+    user: CurrentUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Permite a cualquier usuario autenticado actualizar su propio contacto CRM."""
+    updated = await crud_contacts.update_contact(
+        db, str(user.id), data, changed_by=str(user.id),
+    )
+    if not updated:
+        raise NotFoundError("Contact")
+    return updated
 
 
 @router.patch("/{contact_id}", response_model=ContactResponse)
