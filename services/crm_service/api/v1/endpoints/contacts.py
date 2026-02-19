@@ -68,13 +68,35 @@ async def update_my_contact(
     user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    """Permite a cualquier usuario autenticado actualizar su propio contacto CRM."""
-    updated = await crud_contacts.update_contact(
-        db, str(user.id), data, changed_by=str(user.id),
+    """Permite a cualquier usuario autenticado actualizar su propio contacto CRM.
+    Usa upsert: crea el registro si no existe todavía.
+    """
+    user_id = str(user.id)
+    update_data = data.model_dump(exclude_unset=True)
+
+    if not update_data:
+        # Nada que actualizar — devolver contacto existente sin tocar la BD
+        existing = await crud_contacts.get_contact_by_id(db, user_id)
+        if not existing:
+            raise NotFoundError("Contact")
+        return existing
+
+    # Incluir user_id y email (del token) para que el INSERT funcione
+    # si el contacto aún no existe en crm.contacts
+    upsert_data: dict = {**update_data, "user_id": user_id}
+    email = getattr(user, "email", None)
+    if email:
+        upsert_data.setdefault("email", email)
+
+    result = (
+        await db.schema("crm")
+        .table("contacts")
+        .upsert(upsert_data, on_conflict="user_id")
+        .execute()
     )
-    if not updated:
+    if not result.data:
         raise NotFoundError("Contact")
-    return updated
+    return result.data[0]
 
 
 @router.patch("/{contact_id}", response_model=ContactResponse)

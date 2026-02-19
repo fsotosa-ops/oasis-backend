@@ -46,7 +46,7 @@ async def get_contact_by_id(db: AsyncClient, user_id: str) -> Optional[dict]:
         .table("contacts")
         .select("*")
         .eq("user_id", user_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     return result.data
