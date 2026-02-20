@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -21,6 +22,8 @@ from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from services.gamification_service.crud import config as gamif_config_crud
 from supabase import AsyncClient
 
+logger = logging.getLogger(__name__)
+
 # Campos que se consideran para calcular si el perfil está "completo"
 _COMPLETION_FIELDS = ("phone", "birth_date", "gender", "education_level", "occupation", "company", "city")
 # Número mínimo de campos requeridos para considerar el perfil completo
@@ -39,7 +42,10 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
     """
     # 1. Verificar si el perfil está completo
     filled = sum(1 for f in _COMPLETION_FIELDS if contact.get(f))
+    logger.info("profile_completion: user=%s filled=%d/%d fields=%s", user_id, filled, _COMPLETION_THRESHOLD,
+                {f: bool(contact.get(f)) for f in _COMPLETION_FIELDS})
     if filled < _COMPLETION_THRESHOLD:
+        logger.info("profile_completion: user=%s threshold not met (%d < %d)", user_id, filled, _COMPLETION_THRESHOLD)
         return
 
     # 2. Buscar la organización del usuario
@@ -51,6 +57,7 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
         .execute()
     )
     if not membership.data:
+        logger.warning("profile_completion: user=%s has no organization membership, skipping", user_id)
         return
     org_id_str = membership.data[0]["organization_id"]
     org_id = UUID(org_id_str)
@@ -147,13 +154,16 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
         .execute()
     )
     if existing_ledger.data:
+        logger.info("profile_completion: user=%s already awarded (fallback), skipping", user_id)
         return
 
     config = await gamif_config_crud.get_config(db, org_id)
     if not config:
+        logger.warning("profile_completion: user=%s no gamification_config for org=%s", user_id, org_id)
         return
     points = config.get("profile_completion_points", 0)
     if not points or points <= 0:
+        logger.warning("profile_completion: user=%s profile_completion_points=0 in config for org=%s", user_id, org_id)
         return
 
     await db.schema("journeys").table("points_ledger").insert({
@@ -267,7 +277,7 @@ async def update_my_contact(
     try:
         await _try_award_profile_completion_points(db, user_id, saved_contact)
     except Exception:
-        pass  # No bloquear la respuesta si falla la gamificación
+        logger.exception("profile_completion: unexpected error for user=%s", user_id)
 
     return saved_contact
 
