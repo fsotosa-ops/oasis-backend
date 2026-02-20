@@ -5,9 +5,11 @@ from supabase import AsyncClient
 
 from common.auth.security import CurrentUser
 from common.database.client import get_admin_client
+from services.gamification_service.crud import config as config_crud
 from services.gamification_service.crud import levels as levels_crud
 from services.gamification_service.crud import points as points_crud
 from services.gamification_service.crud import user_rewards as user_rewards_crud
+from services.gamification_service.schemas.config import GamificationConfigRead
 from services.gamification_service.schemas.points import (
     ActivityRead,
     PointsLedgerRead,
@@ -136,3 +138,18 @@ async def get_user_ledger(
     user_id = UUID(str(current_user.id))
     parsed_org = UUID(org_id) if org_id else None
     return await points_crud.get_user_points_ledger(db, user_id, parsed_org, limit=limit)
+
+
+@router.get(
+    "/config",
+    response_model=GamificationConfigRead | None,
+    summary="Configuracion de gamificacion de la org del usuario",
+)
+async def get_my_config(
+    current_user: CurrentUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(default=None, description="Organization ID"),
+):
+    if not org_id:
+        return None
+    return await config_crud.get_config(db, UUID(org_id))
