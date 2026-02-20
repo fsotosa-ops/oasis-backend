@@ -74,3 +74,6 @@ dmypy.json
 
 # OS
 .DS_Store
+
+
+openapi_oasis.json
