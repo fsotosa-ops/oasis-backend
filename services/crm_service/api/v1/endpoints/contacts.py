@@ -50,7 +50,7 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
 
     # 2. Buscar la organización del usuario
     membership = (
-        await db.schema("auth").table("organization_members")
+        await db.table("organization_members")
         .select("organization_id")
         .eq("user_id", user_id)
         .limit(1)
