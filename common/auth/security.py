@@ -38,7 +38,8 @@ async def get_current_user(token: str = Depends(get_current_token)):
 # ---------------------------------------------------------------------------
 class PlatformAdminRequired:
     async def __call__(self, user=Depends(get_current_user)):
-        is_admin = user.user_metadata.get("is_platform_admin", False)
+        metadata = getattr(user, "user_metadata", None) or {}
+        is_admin = metadata.get("is_platform_admin", False)
         if not is_admin:
             raise ForbiddenError(
                 message="Acceso denegado: Se requieren permisos de Administrador."
@@ -85,7 +86,8 @@ class OrgRoleRequired:
         memberships: list[dict] = Depends(get_user_memberships),
     ) -> OrgContext:
         # Platform admins tienen acceso total a cualquier organizacion
-        if user.user_metadata.get("is_platform_admin", False):
+        metadata = getattr(user, "user_metadata", None) or {}
+        if metadata.get("is_platform_admin", False):
             return OrgContext(
                 organization_id=org_id,
                 role="owner",

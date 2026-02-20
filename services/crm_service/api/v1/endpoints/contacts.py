@@ -41,6 +41,18 @@ async def list_contacts(
     return {"contacts": contacts, "count": count}
 
 
+@router.get("/me", response_model=ContactResponse)
+async def get_my_contact(
+    user: CurrentUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Permite a cualquier usuario autenticado consultar su propio contacto CRM."""
+    contact = await crud_contacts.get_contact_by_id(db, str(user.id))
+    if not contact:
+        raise NotFoundError("Contact")
+    return contact
+
+
 @router.get("/{contact_id}", response_model=ContactResponse)
 async def get_contact(
     contact_id: UUID,
@@ -72,7 +84,7 @@ async def update_my_contact(
     Usa upsert: crea el registro si no existe todavía.
     """
     user_id = str(user.id)
-    update_data = data.model_dump(exclude_unset=True)
+    update_data = data.model_dump(exclude_unset=True, mode="json")
 
     if not update_data:
         # Nada que actualizar — devolver contacto existente sin tocar la BD
