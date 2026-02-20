@@ -39,8 +39,10 @@ CREATE POLICY "admin_reward_organizations" ON journeys.reward_organizations
 
 -- 4. GRANTS
 -- =============================================================================
-GRANT SELECT ON TABLE journeys.reward_organizations TO authenticated;
-GRANT INSERT, UPDATE, DELETE ON TABLE journeys.reward_organizations TO authenticated;
+-- service_role (usado por el admin client de Python) necesita grant explícito
+-- porque GRANT ALL ON ALL TABLES solo cubre tablas existentes en ese momento.
+GRANT ALL ON TABLE journeys.reward_organizations TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE journeys.reward_organizations TO authenticated;
 
 -- 5. BACKFILL: registrar la org propietaria de cada reward existente
 -- =============================================================================

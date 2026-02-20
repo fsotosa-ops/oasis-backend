@@ -86,8 +86,6 @@ class RewardOrganizationRead(BaseModel):
     reward_id: UUID4
     organization_id: UUID4
     assigned_at: datetime
-    org_name: str | None = None
-    org_slug: str | None = None
 
     class Config:
         from_attributes = True

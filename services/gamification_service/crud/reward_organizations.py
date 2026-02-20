@@ -4,21 +4,17 @@ from supabase import AsyncClient
 
 
 async def get_assigned_orgs(db: AsyncClient, reward_id: UUID) -> list[dict]:
-    """Devuelve las organizaciones asignadas a una recompensa."""
+    """Devuelve las organizaciones asignadas a una recompensa.
+    No usa join cross-schema (journeys → public) para evitar errores de schema cache.
+    """
     response = (
         await db.schema("journeys").table("reward_organizations")
-        .select("id, reward_id, organization_id, assigned_at, organizations(id, name, slug)")
+        .select("id, reward_id, organization_id, assigned_at")
         .eq("reward_id", str(reward_id))
         .order("assigned_at")
         .execute()
     )
-    rows = response.data or []
-    # Aplanar la org anidada
-    result = []
-    for row in rows:
-        org = row.pop("organizations", None) or {}
-        result.append({**row, "org_name": org.get("name"), "org_slug": org.get("slug")})
-    return result
+    return response.data or []
 
 
 async def assign_to_orgs(
