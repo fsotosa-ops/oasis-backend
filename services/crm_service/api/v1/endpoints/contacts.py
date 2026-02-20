@@ -117,20 +117,25 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
             reward_points = reward.get("points", 0) or 0
 
             if reward_id in already_granted:
-                # Badge ya otorgado — verificar si los puntos fueron añadidos al ledger.
-                # Pueden faltar si el reward tenía points=0 en el momento de la concesión
-                # y después el admin aumentó el valor.
+                # Badge ya otorgado — verificar el estado del ledger para este reward.
+                # Escenarios:
+                #   a) No hay entrada → reward tenía points=0 al concederse, añadir retroactivamente.
+                #   b) Hay exactamente una entrada con el monto correcto → nada que hacer.
+                #   c) Hay entrada(s) con monto incorrecto (admin cambió el valor) → actualizar la más reciente.
+                #   d) Hay entradas duplicadas → eliminar las más viejas, mantener solo la más reciente.
                 if reward_points > 0:
-                    existing_reward_ledger = (
+                    existing_entries_resp = (
                         await db.schema("journeys").table("points_ledger")
-                        .select("id")
+                        .select("id, amount")
                         .eq("user_id", user_id)
                         .eq("reference_id", reward_id)
-                        .limit(1)
+                        .order("created_at", desc=True)  # más reciente primero
                         .execute()
                     )
-                    if not existing_reward_ledger.data:
-                        # Badge concedido sin puntos — añadir entrada al ledger retroactivamente
+                    existing_entries = existing_entries_resp.data or []
+
+                    if not existing_entries:
+                        # Caso (a): sin entrada — insertar retroactivamente
                         await db.schema("journeys").table("points_ledger").insert({
                             "user_id": user_id,
                             "organization_id": org_id_str,
@@ -149,6 +154,28 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
                             "profile_completion: user=%s retroactively added %d points for reward=%s",
                             user_id, reward_points, reward_id,
                         )
+                    else:
+                        # Caso (c)/(d): ya existe al menos una entrada
+                        most_recent = existing_entries[0]
+
+                        # Eliminar duplicados (todas las entradas excepto la más reciente)
+                        if len(existing_entries) > 1:
+                            ids_to_delete = [e["id"] for e in existing_entries[1:]]
+                            await db.schema("journeys").table("points_ledger").delete().in_("id", ids_to_delete).execute()
+                            logger.info(
+                                "profile_completion: user=%s removed %d duplicate ledger entries for reward=%s",
+                                user_id, len(ids_to_delete), reward_id,
+                            )
+
+                        # Actualizar monto si el admin cambió los puntos de la recompensa
+                        if most_recent["amount"] != reward_points:
+                            await db.schema("journeys").table("points_ledger").update(
+                                {"amount": reward_points}
+                            ).eq("id", most_recent["id"]).execute()
+                            logger.info(
+                                "profile_completion: user=%s updated ledger from %d to %d pts for reward=%s",
+                                user_id, most_recent["amount"], reward_points, reward_id,
+                            )
                 continue
 
             # Otorgar la recompensa (primera vez)
