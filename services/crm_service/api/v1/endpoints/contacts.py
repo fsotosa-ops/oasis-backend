@@ -53,6 +53,8 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
         await db.table("organization_members")
         .select("organization_id")
         .eq("user_id", user_id)
+        .eq("status", "active")
+        .order("joined_at")
         .limit(1)
         .execute()
     )
