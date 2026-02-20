@@ -112,18 +112,50 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
 
         for reward in trigger_rewards:
             reward_id = str(reward["id"])
-            if reward_id in already_granted:
-                continue  # Ya tiene esta recompensa
+            reward_points = reward.get("points", 0) or 0
 
-            # Otorgar la recompensa
+            if reward_id in already_granted:
+                # Badge ya otorgado — verificar si los puntos fueron añadidos al ledger.
+                # Pueden faltar si el reward tenía points=0 en el momento de la concesión
+                # y después el admin aumentó el valor.
+                if reward_points > 0:
+                    existing_reward_ledger = (
+                        await db.schema("journeys").table("points_ledger")
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .eq("reference_id", reward_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if not existing_reward_ledger.data:
+                        # Badge concedido sin puntos — añadir entrada al ledger retroactivamente
+                        await db.schema("journeys").table("points_ledger").insert({
+                            "user_id": user_id,
+                            "organization_id": org_id_str,
+                            "amount": reward_points,
+                            "reason": "profile_completion",
+                            "reference_id": reward_id,
+                        }).execute()
+                        await db.schema("journeys").table("user_activities").insert({
+                            "user_id": user_id,
+                            "organization_id": org_id_str,
+                            "type": "profile_completed",
+                            "points_awarded": reward_points,
+                            "metadata": {"reward_id": reward_id, "fields_filled": filled},
+                        }).execute()
+                        logger.info(
+                            "profile_completion: user=%s retroactively added %d points for reward=%s",
+                            user_id, reward_points, reward_id,
+                        )
+                continue
+
+            # Otorgar la recompensa (primera vez)
             await db.schema("journeys").table("user_rewards").insert({
                 "user_id": user_id,
                 "reward_id": reward_id,
                 "metadata": {"trigger": "profile_completion", "fields_filled": filled},
             }).execute()
 
-            # Añadir puntos al ledger usando el campo points del reward (campo propio)
-            reward_points = reward.get("points", 0) or 0
             if reward_points > 0:
                 await db.schema("journeys").table("points_ledger").insert({
                     "user_id": user_id,
