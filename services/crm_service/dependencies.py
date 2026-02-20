@@ -14,7 +14,8 @@ FUNDACION_SUMMER_NAME = "Fundación Summer"
 # ---------------------------------------------------------------------------
 def _check_platform_admin(user, memberships: list[dict]) -> bool:
     """Replica crm.is_platform_admin(): metadata flag OR admin/owner de Fundación Summer."""
-    if user.user_metadata.get("is_platform_admin", False):
+    metadata = getattr(user, "user_metadata", None) or {}
+    if metadata.get("is_platform_admin", False):
         return True
     for m in memberships:
         org = m.get("organizations") or {}

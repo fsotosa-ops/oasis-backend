@@ -74,7 +74,7 @@ async def update_contact(
     data: ContactUpdate,
     changed_by: Optional[str] = None,
 ) -> Optional[dict]:
-    update_data = data.model_dump(exclude_unset=True)
+    update_data = data.model_dump(exclude_unset=True, mode="json")
     if not update_data:
         return await get_contact_by_id(db, user_id)
 
