@@ -9,6 +9,7 @@ class GamificationConfigCreate(BaseModel):
     rewards_enabled: bool = True
     points_multiplier: float = Field(default=1.00, ge=0.01, le=99.99)
     default_step_points: int = Field(default=10, ge=0)
+    profile_completion_points: int = Field(default=0, ge=0)
 
 
 class GamificationConfigUpdate(BaseModel):
@@ -17,6 +18,7 @@ class GamificationConfigUpdate(BaseModel):
     rewards_enabled: bool | None = None
     points_multiplier: float | None = Field(default=None, ge=0.01, le=99.99)
     default_step_points: int | None = Field(default=None, ge=0)
+    profile_completion_points: int | None = Field(default=None, ge=0)
 
 
 class GamificationConfigRead(BaseModel):
@@ -27,6 +29,7 @@ class GamificationConfigRead(BaseModel):
     rewards_enabled: bool = True
     points_multiplier: float = 1.00
     default_step_points: int = 10
+    profile_completion_points: int = 0
     created_at: datetime
     updated_at: datetime
 
