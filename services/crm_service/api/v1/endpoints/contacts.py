@@ -18,7 +18,159 @@ from services.crm_service.dependencies import (
 from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate, PaginatedContactsResponse
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
+from services.gamification_service.crud import config as gamif_config_crud
 from supabase import AsyncClient
+
+# Campos que se consideran para calcular si el perfil está "completo"
+_COMPLETION_FIELDS = ("phone", "birth_date", "gender", "education_level", "occupation", "company", "city")
+# Número mínimo de campos requeridos para considerar el perfil completo
+_COMPLETION_THRESHOLD = 5
+
+
+async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, contact: dict) -> None:
+    """Otorga puntos y recompensas de completitud de perfil.
+
+    Flujo:
+    1. Verifica que el perfil supere el umbral de campos rellenos.
+    2. Busca la org del usuario.
+    3. Busca recompensas del catálogo con unlock_condition.trigger = 'profile_completion'.
+       - Para cada recompensa no otorgada: la concede + registra sus puntos en el ledger.
+    4. Fallback: si no hay recompensas con trigger, usa profile_completion_points del config.
+    """
+    # 1. Verificar si el perfil está completo
+    filled = sum(1 for f in _COMPLETION_FIELDS if contact.get(f))
+    if filled < _COMPLETION_THRESHOLD:
+        return
+
+    # 2. Buscar la organización del usuario
+    membership = (
+        await db.schema("auth").table("organization_members")
+        .select("organization_id")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not membership.data:
+        return
+    org_id_str = membership.data[0]["organization_id"]
+    org_id = UUID(org_id_str)
+
+    # 3. Buscar recompensas del catálogo con condición "profile_completion"
+    # Incluye: propiedad de la org, globales (organization_id NULL), y asignadas por pivot
+    catalog_resp = (
+        await db.schema("journeys").table("rewards_catalog")
+        .select("id, points, unlock_condition")
+        .or_(f"organization_id.eq.{org_id_str},organization_id.is.null")
+        .execute()
+    )
+    catalog = catalog_resp.data or []
+    catalog_ids = {r["id"] for r in catalog}
+
+    # Vía tabla pivot reward_organizations
+    pivot_resp = (
+        await db.schema("journeys").table("reward_organizations")
+        .select("reward_id")
+        .eq("organization_id", org_id_str)
+        .execute()
+    )
+    extra_ids = [r["reward_id"] for r in (pivot_resp.data or []) if r["reward_id"] not in catalog_ids]
+    if extra_ids:
+        extra_resp = (
+            await db.schema("journeys").table("rewards_catalog")
+            .select("id, points, unlock_condition")
+            .in_("id", extra_ids)
+            .execute()
+        )
+        catalog.extend(extra_resp.data or [])
+
+    def _has_profile_completion_condition(uc: dict) -> bool:
+        conditions = uc.get("conditions", [])
+        return any(c.get("type") == "profile_completion" for c in conditions)
+
+    trigger_rewards = [
+        r for r in catalog
+        if isinstance(r.get("unlock_condition"), dict)
+        and _has_profile_completion_condition(r["unlock_condition"])
+    ]
+
+    if trigger_rewards:
+        # Recompensas ya otorgadas a este usuario
+        granted_resp = (
+            await db.schema("journeys").table("user_rewards")
+            .select("reward_id")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        already_granted = {str(r["reward_id"]) for r in (granted_resp.data or [])}
+
+        for reward in trigger_rewards:
+            reward_id = str(reward["id"])
+            if reward_id in already_granted:
+                continue  # Ya tiene esta recompensa
+
+            # Otorgar la recompensa
+            await db.schema("journeys").table("user_rewards").insert({
+                "user_id": user_id,
+                "reward_id": reward_id,
+                "metadata": {"trigger": "profile_completion", "fields_filled": filled},
+            }).execute()
+
+            # Añadir puntos al ledger usando el campo points del reward (campo propio)
+            reward_points = reward.get("points", 0) or 0
+            if reward_points > 0:
+                await db.schema("journeys").table("points_ledger").insert({
+                    "user_id": user_id,
+                    "organization_id": org_id_str,
+                    "amount": reward_points,
+                    "reason": "profile_completion",
+                    "reference_id": reward_id,
+                }).execute()
+
+                await db.schema("journeys").table("user_activities").insert({
+                    "user_id": user_id,
+                    "organization_id": org_id_str,
+                    "type": "profile_completed",
+                    "points_awarded": reward_points,
+                    "metadata": {"reward_id": reward_id, "fields_filled": filled},
+                }).execute()
+
+        return  # Recompensas gestionadas — no ejecutar el fallback
+
+    # 4. Fallback: usar profile_completion_points del config de la org
+    # Solo si nunca se han otorgado puntos de perfil anteriormente
+    existing_ledger = (
+        await db.schema("journeys").table("points_ledger")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("reason", "profile_completion")
+        .limit(1)
+        .execute()
+    )
+    if existing_ledger.data:
+        return
+
+    config = await gamif_config_crud.get_config(db, org_id)
+    if not config:
+        return
+    points = config.get("profile_completion_points", 0)
+    if not points or points <= 0:
+        return
+
+    await db.schema("journeys").table("points_ledger").insert({
+        "user_id": user_id,
+        "organization_id": org_id_str,
+        "amount": points,
+        "reason": "profile_completion",
+        "reference_id": user_id,
+    }).execute()
+
+    await db.schema("journeys").table("user_activities").insert({
+        "user_id": user_id,
+        "organization_id": org_id_str,
+        "type": "profile_completed",
+        "points_awarded": points,
+        "metadata": {"fields_filled": filled},
+    }).execute()
 
 router = APIRouter()
 
@@ -108,7 +260,16 @@ async def update_my_contact(
     )
     if not result.data:
         raise NotFoundError("Contact")
-    return result.data[0]
+
+    saved_contact = result.data[0]
+
+    # Intentar otorgar puntos de gamificación por completitud de perfil (fire & forget)
+    try:
+        await _try_award_profile_completion_points(db, user_id, saved_contact)
+    except Exception:
+        pass  # No bloquear la respuesta si falla la gamificación
+
+    return saved_contact
 
 
 @router.patch("/{contact_id}", response_model=ContactResponse)
