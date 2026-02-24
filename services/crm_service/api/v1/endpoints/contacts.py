@@ -20,6 +20,12 @@ from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from services.gamification_service.crud import config as gamif_config_crud
+from services.journey_service.crud.enrollments import (
+    complete_step as complete_journey_step,
+    create_enrollment,
+    get_active_enrollment,
+    is_step_already_completed,
+)
 from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
@@ -31,14 +37,19 @@ _COMPLETION_THRESHOLD = 5
 
 
 async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, contact: dict) -> None:
-    """Otorga puntos y recompensas de completitud de perfil.
+    """Marca el step de 'Completar Perfil' en el Journey de Onboarding cuando el perfil
+    supera el umbral de completitud. Si no hay Journey configurado, no hace nada
+    (los puntos vienen del Journey trigger al completar el step manualmente).
 
     Flujo:
     1. Verifica que el perfil supere el umbral de campos rellenos.
     2. Busca la org del usuario.
-    3. Busca recompensas del catálogo con unlock_condition.trigger = 'profile_completion'.
-       - Para cada recompensa no otorgada: la concede + registra sus puntos en el ledger.
-    4. Fallback: si no hay recompensas con trigger, usa profile_completion_points del config.
+    3. Lee gamification_config para obtener profile_completion_journey_id y profile_completion_step_id.
+    4. Si están configurados:
+       a. Busca o crea un enrollment activo en el Journey de Onboarding.
+       b. Si el step ya está completado → skip (idempotente).
+       c. Completa el step → el trigger SQL maneja puntos, ledger y rewards.
+    5. Si NO están configurados → log y return (no hacer nada, evitar doble conteo).
     """
     # 1. Verificar si el perfil está completo
     filled = sum(1 for f in _COMPLETION_FIELDS if contact.get(f))
@@ -64,184 +75,51 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
     org_id_str = membership.data[0]["organization_id"]
     org_id = UUID(org_id_str)
 
-    # 3. Buscar recompensas del catálogo con condición "profile_completion"
-    # Incluye: propiedad de la org, globales (organization_id NULL), y asignadas por pivot
-    catalog_resp = (
-        await db.schema("journeys").table("rewards_catalog")
-        .select("id, points, unlock_condition")
-        .or_(f"organization_id.eq.{org_id_str},organization_id.is.null")
-        .execute()
-    )
-    catalog = catalog_resp.data or []
-    catalog_ids = {r["id"] for r in catalog}
-
-    # Vía tabla pivot reward_organizations
-    pivot_resp = (
-        await db.schema("journeys").table("reward_organizations")
-        .select("reward_id")
-        .eq("organization_id", org_id_str)
-        .execute()
-    )
-    extra_ids = [r["reward_id"] for r in (pivot_resp.data or []) if r["reward_id"] not in catalog_ids]
-    if extra_ids:
-        extra_resp = (
-            await db.schema("journeys").table("rewards_catalog")
-            .select("id, points, unlock_condition")
-            .in_("id", extra_ids)
-            .execute()
-        )
-        catalog.extend(extra_resp.data or [])
-
-    def _has_profile_completion_condition(uc: dict) -> bool:
-        conditions = uc.get("conditions", [])
-        return any(c.get("type") == "profile_completion" for c in conditions)
-
-    trigger_rewards = [
-        r for r in catalog
-        if isinstance(r.get("unlock_condition"), dict)
-        and _has_profile_completion_condition(r["unlock_condition"])
-    ]
-
-    if trigger_rewards:
-        # Recompensas ya otorgadas a este usuario
-        granted_resp = (
-            await db.schema("journeys").table("user_rewards")
-            .select("reward_id")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        already_granted = {str(r["reward_id"]) for r in (granted_resp.data or [])}
-
-        for reward in trigger_rewards:
-            reward_id = str(reward["id"])
-            reward_points = reward.get("points", 0) or 0
-
-            if reward_id in already_granted:
-                # Badge ya otorgado — verificar el estado del ledger para este reward.
-                # Escenarios:
-                #   a) No hay entrada → reward tenía points=0 al concederse, añadir retroactivamente.
-                #   b) Hay exactamente una entrada con el monto correcto → nada que hacer.
-                #   c) Hay entrada(s) con monto incorrecto (admin cambió el valor) → actualizar la más reciente.
-                #   d) Hay entradas duplicadas → eliminar las más viejas, mantener solo la más reciente.
-                if reward_points > 0:
-                    existing_entries_resp = (
-                        await db.schema("journeys").table("points_ledger")
-                        .select("id, amount")
-                        .eq("user_id", user_id)
-                        .eq("reference_id", reward_id)
-                        .order("created_at", desc=True)  # más reciente primero
-                        .execute()
-                    )
-                    existing_entries = existing_entries_resp.data or []
-
-                    if not existing_entries:
-                        # Caso (a): sin entrada — insertar retroactivamente
-                        await db.schema("journeys").table("points_ledger").insert({
-                            "user_id": user_id,
-                            "organization_id": org_id_str,
-                            "amount": reward_points,
-                            "reason": "profile_completion",
-                            "reference_id": reward_id,
-                        }).execute()
-                        await db.schema("journeys").table("user_activities").insert({
-                            "user_id": user_id,
-                            "organization_id": org_id_str,
-                            "type": "profile_completed",
-                            "points_awarded": reward_points,
-                            "metadata": {"reward_id": reward_id, "fields_filled": filled},
-                        }).execute()
-                        logger.info(
-                            "profile_completion: user=%s retroactively added %d points for reward=%s",
-                            user_id, reward_points, reward_id,
-                        )
-                    else:
-                        # Caso (c)/(d): ya existe al menos una entrada
-                        most_recent = existing_entries[0]
-
-                        # Eliminar duplicados (todas las entradas excepto la más reciente)
-                        if len(existing_entries) > 1:
-                            ids_to_delete = [e["id"] for e in existing_entries[1:]]
-                            await db.schema("journeys").table("points_ledger").delete().in_("id", ids_to_delete).execute()
-                            logger.info(
-                                "profile_completion: user=%s removed %d duplicate ledger entries for reward=%s",
-                                user_id, len(ids_to_delete), reward_id,
-                            )
-
-                        # Actualizar monto si el admin cambió los puntos de la recompensa
-                        if most_recent["amount"] != reward_points:
-                            await db.schema("journeys").table("points_ledger").update(
-                                {"amount": reward_points}
-                            ).eq("id", most_recent["id"]).execute()
-                            logger.info(
-                                "profile_completion: user=%s updated ledger from %d to %d pts for reward=%s",
-                                user_id, most_recent["amount"], reward_points, reward_id,
-                            )
-                continue
-
-            # Otorgar la recompensa (primera vez)
-            await db.schema("journeys").table("user_rewards").insert({
-                "user_id": user_id,
-                "reward_id": reward_id,
-                "metadata": {"trigger": "profile_completion", "fields_filled": filled},
-            }).execute()
-
-            if reward_points > 0:
-                await db.schema("journeys").table("points_ledger").insert({
-                    "user_id": user_id,
-                    "organization_id": org_id_str,
-                    "amount": reward_points,
-                    "reason": "profile_completion",
-                    "reference_id": reward_id,
-                }).execute()
-
-                await db.schema("journeys").table("user_activities").insert({
-                    "user_id": user_id,
-                    "organization_id": org_id_str,
-                    "type": "profile_completed",
-                    "points_awarded": reward_points,
-                    "metadata": {"reward_id": reward_id, "fields_filled": filled},
-                }).execute()
-
-        return  # Recompensas gestionadas — no ejecutar el fallback
-
-    # 4. Fallback: usar profile_completion_points del config de la org
-    # Solo si nunca se han otorgado puntos de perfil anteriormente
-    existing_ledger = (
-        await db.schema("journeys").table("points_ledger")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("reason", "profile_completion")
-        .limit(1)
-        .execute()
-    )
-    if existing_ledger.data:
-        logger.info("profile_completion: user=%s already awarded (fallback), skipping", user_id)
-        return
-
+    # 3. Leer config de gamificación para este org
     config = await gamif_config_crud.get_config(db, org_id)
-    if not config:
-        logger.warning("profile_completion: user=%s no gamification_config for org=%s", user_id, org_id)
-        return
-    points = config.get("profile_completion_points", 0)
-    if not points or points <= 0:
-        logger.warning("profile_completion: user=%s profile_completion_points=0 in config for org=%s", user_id, org_id)
+    journey_id_str = (config or {}).get("profile_completion_journey_id")
+    step_id_str = (config or {}).get("profile_completion_step_id")
+
+    if not journey_id_str or not step_id_str:
+        logger.warning(
+            "profile_completion: user=%s no onboarding journey/step configured for org=%s — "
+            "configure profile_completion_journey_id and profile_completion_step_id in gamification_config",
+            user_id, org_id_str,
+        )
         return
 
-    await db.schema("journeys").table("points_ledger").insert({
-        "user_id": user_id,
-        "organization_id": org_id_str,
-        "amount": points,
-        "reason": "profile_completion",
-        "reference_id": user_id,
-    }).execute()
+    # 4. Usar el sistema de Journeys (fuente única de verdad para puntos/rewards)
+    user_uuid = UUID(user_id)
+    journey_id = UUID(journey_id_str)
+    step_id = UUID(step_id_str)
 
-    await db.schema("journeys").table("user_activities").insert({
-        "user_id": user_id,
-        "organization_id": org_id_str,
-        "type": "profile_completed",
-        "points_awarded": points,
-        "metadata": {"fields_filled": filled},
-    }).execute()
+    # a. Obtener o crear enrollment en el Journey de Onboarding
+    enrollment = await get_active_enrollment(db, user_uuid, journey_id)
+    if not enrollment:
+        enrollment = await create_enrollment(db, user_uuid, journey_id)
+        logger.info("profile_completion: user=%s enrolled in onboarding journey=%s", user_id, journey_id_str)
+
+    enrollment_id = UUID(enrollment["id"])
+
+    # b. Verificar si el step ya fue completado (idempotente)
+    if await is_step_already_completed(db, enrollment_id, step_id):
+        logger.info(
+            "profile_completion: user=%s step=%s already completed — skipping",
+            user_id, step_id_str,
+        )
+        return
+
+    # c. Completar el step — el trigger SQL crea user_activities + points_ledger + rewards
+    await complete_journey_step(
+        db,
+        enrollment_id,
+        step_id,
+        metadata={"trigger": "profile_completion", "fields_filled": filled},
+    )
+    logger.info(
+        "profile_completion: user=%s completed step=%s in journey=%s (%d fields filled)",
+        user_id, step_id_str, journey_id_str, filled,
+    )
 
 router = APIRouter()
 
