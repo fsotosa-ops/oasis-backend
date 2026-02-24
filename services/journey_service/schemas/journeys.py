@@ -10,6 +10,7 @@ StepType = Literal[
     "milestone",
     "social_interaction",
     "resource_consumption",
+    "profile_question",
 ]
 
 
@@ -61,6 +62,15 @@ class SocialInteractionConfig(BaseModel):
     description: str | None = None
 
 
+class ProfileQuestionConfig(BaseModel):
+    description: str | None = None
+    field_name: str  # CRM contact field: phone, birth_date, gender, education_level, occupation, company, city, country, state
+    field_label: str | None = None  # Human-readable label for the question
+    field_type: str = "text"  # text, date, select
+    options: list[str] | None = None  # For select type fields
+    required: bool = True
+
+
 _STEP_CONFIG_SCHEMAS: dict[str, type[BaseModel]] = {
     "survey": SurveyConfig,
     "content_view": ContentViewConfig,
@@ -68,6 +78,7 @@ _STEP_CONFIG_SCHEMAS: dict[str, type[BaseModel]] = {
     "milestone": MilestoneConfig,
     "event_attendance": EventAttendanceConfig,
     "social_interaction": SocialInteractionConfig,
+    "profile_question": ProfileQuestionConfig,
 }
 
 
@@ -155,6 +166,7 @@ class JourneyBase(BaseModel):
     slug: str
     description: str | None = None
     is_active: bool = True
+    is_onboarding: bool = False
     metadata: dict = Field(default_factory=dict)
 
 
@@ -174,6 +186,7 @@ class JourneyCreate(BaseModel):
     description: str | None = None
     thumbnail_url: str | None = None
     is_active: bool = False
+    is_onboarding: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -185,6 +198,7 @@ class JourneyUpdate(BaseModel):
     description: str | None = None
     thumbnail_url: str | None = None
     is_active: bool | None = None
+    is_onboarding: bool | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -196,6 +210,7 @@ class JourneyAdminRead(BaseModel):
     description: str | None = None
     thumbnail_url: str | None = None
     is_active: bool
+    is_onboarding: bool = False
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

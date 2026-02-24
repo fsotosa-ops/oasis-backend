@@ -40,20 +40,44 @@ async def onboarding_check(
 
     org_id = active[0]["organization_id"]
 
-    # Fetch gamification config to get profile_completion_journey_id
-    config_resp = (
+    # First, check for a journey with is_onboarding=true assigned to this org
+    journey_id = None
+    jo_resp = (
         await db.schema("journeys")
-        .table("gamification_config")
-        .select("profile_completion_journey_id")
+        .table("journey_organizations")
+        .select("journey_id")
         .eq("organization_id", org_id)
-        .maybe_single()
         .execute()
     )
-    config = config_resp.data
-    if not config or not config.get("profile_completion_journey_id"):
-        return OnboardingCheckResponse(should_show=False)
+    assigned_ids = [row["journey_id"] for row in (jo_resp.data or [])]
+    if assigned_ids:
+        direct_resp = (
+            await db.schema("journeys")
+            .table("journeys")
+            .select("id")
+            .in_("id", assigned_ids)
+            .eq("is_onboarding", True)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        if direct_resp.data:
+            journey_id = str(direct_resp.data[0]["id"])
 
-    journey_id = str(config["profile_completion_journey_id"])
+    # Fallback: check gamification_config.profile_completion_journey_id
+    if not journey_id:
+        config_resp = (
+            await db.schema("journeys")
+            .table("gamification_config")
+            .select("profile_completion_journey_id")
+            .eq("organization_id", org_id)
+            .maybe_single()
+            .execute()
+        )
+        config = config_resp.data
+        if not config or not config.get("profile_completion_journey_id"):
+            return OnboardingCheckResponse(should_show=False)
+        journey_id = str(config["profile_completion_journey_id"])
 
     # Check if user has a completed enrollment for this journey
     enrollment_resp = (

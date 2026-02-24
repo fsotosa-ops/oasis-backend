@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -15,6 +16,8 @@ from services.journey_service.schemas.enrollments import (
     StepProgressRead,
 )
 from supabase import AsyncClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -162,6 +165,29 @@ async def complete_step(
     metadata = body.metadata if body else None
     external_reference = body.external_reference if body else None
     service_data = body.service_data if body else None
+
+    # If the step is a profile_question, save the answer to CRM contact
+    step = await crud.get_step_by_id(db, step_id)
+    if step and step.get("type") == "profile_question":
+        config = step.get("config") or {}
+        field_name = config.get("field_name")
+        answer = (metadata or {}).get("answer")
+        if field_name and answer is not None:
+            try:
+                user_id_str = str(current_user.id)
+                upsert_data = {"user_id": user_id_str, field_name: answer}
+                email = getattr(current_user, "email", None)
+                if email:
+                    upsert_data["email"] = email
+                await db.schema("crm").table("contacts").upsert(
+                    upsert_data, on_conflict="user_id"
+                ).execute()
+                logger.info(
+                    "profile_question: saved %s=%s for user=%s",
+                    field_name, answer, user_id_str,
+                )
+            except Exception:
+                logger.exception("profile_question: failed to save CRM field for user=%s", str(current_user.id))
 
     completion = await crud.complete_step(
         db, enrollment_id, step_id,

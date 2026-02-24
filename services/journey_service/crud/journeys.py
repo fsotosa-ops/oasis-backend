@@ -140,6 +140,7 @@ async def create_journey(
         "description": journey.description,
         "thumbnail_url": journey.thumbnail_url,
         "is_active": journey.is_active,
+        "is_onboarding": journey.is_onboarding,
         "metadata": journey.metadata,
     }
 
