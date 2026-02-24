@@ -42,8 +42,31 @@ async def get_user_activities(
     )
     if org_id:
         query = query.eq("organization_id", str(org_id))
-    response = await query.order("created_at", desc=True).limit(limit).execute()
-    return response.data or []
+    # Fetch more rows than needed so we have enough after deduplication
+    response = await query.order("created_at", desc=True).limit(limit * 4).execute()
+    raw = response.data or []
+
+    # Deduplicate: for activity types that carry a stable reference, keep only the
+    # most recent occurrence (rows are already ordered newest-first).
+    seen_keys: set[str] = set()
+    result = []
+    for entry in raw:
+        act_type = entry.get("type", "")
+        meta = entry.get("metadata") or {}
+        ref = None
+        if act_type == "profile_completed":
+            ref = meta.get("reward_id")
+        elif act_type == "step_completed":
+            ref = meta.get("step_id")
+        elif act_type == "journey_completed":
+            ref = meta.get("journey_id")
+        if ref is not None:
+            key = f"{act_type}:{ref}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+        result.append(entry)
+    return result[:limit]
 
 
 async def get_user_points_ledger(

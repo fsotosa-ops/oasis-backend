@@ -20,7 +20,18 @@ async def get_user_rewards(db: AsyncClient, user_id: UUID) -> list[dict]:
         catalog = r.pop("rewards_catalog", None)
         r["reward"] = catalog
 
-    return rewards
+    # Deduplicate by reward_id: keep only the most recent grant per reward
+    # (rows are already ordered by earned_at DESC so first occurrence = most recent).
+    seen_reward_ids: set[str] = set()
+    unique_rewards = []
+    for r in rewards:
+        rid = str(r.get("reward_id", ""))
+        if rid and rid in seen_reward_ids:
+            continue
+        seen_reward_ids.add(rid)
+        unique_rewards.append(r)
+
+    return unique_rewards
 
 
 async def get_user_rewards_for_admin(db: AsyncClient, user_id: UUID) -> list[dict]:
