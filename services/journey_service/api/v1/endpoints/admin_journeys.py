@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -5,13 +6,24 @@ from fastapi import APIRouter, Depends, Query, status
 from common.auth.security import AdminUser, OrgRoleRequired, get_current_user
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
+from services.gamification_service.crud import config as gamif_config_crud
+from services.gamification_service.schemas.config import (
+    GamificationConfigCreate,
+    GamificationConfigUpdate,
+)
+from services.journey_service.api.v1.endpoints.admin_templates import _ONBOARDING_STEPS
 from services.journey_service.crud import journeys as crud
+from services.journey_service.crud import steps as steps_crud
 from services.journey_service.schemas.journeys import (
+    GamificationRules,
     JourneyAdminRead,
     JourneyCreate,
     JourneyUpdate,
+    StepCreate,
 )
 from supabase import AsyncClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -105,6 +117,55 @@ async def update_journey(
 
     if not updated:
         raise NotFoundError("Journey")
+
+    # Handle is_onboarding flag atomically
+    if payload.is_onboarding is True:
+        # Add template steps if none of type profile_field exist
+        existing_steps = await crud.get_steps_by_journey(db, journey_id)
+        has_profile_steps = any(
+            s.get("type") == "profile_field" for s in existing_steps
+        )
+        if not has_profile_steps:
+            for i, step_def in enumerate(_ONBOARDING_STEPS):
+                await steps_crud.create_step(
+                    db,
+                    journey_id,
+                    StepCreate(
+                        title=step_def["title"],
+                        type="profile_field",
+                        order_index=None,
+                        config={
+                            "field_names": step_def["field_names"],
+                            "description": step_def["description"],
+                            "icon": step_def["icon"],
+                        },
+                        gamification_rules=GamificationRules(
+                            base_points=step_def["points"]
+                        ),
+                    ),
+                )
+
+        # Upsert gamification_config with profile_completion_journey_id
+        org_uuid = UUID(org_id)
+        existing_config = await gamif_config_crud.get_config(db, org_uuid) or {}
+        config_fields = {
+            k: v
+            for k, v in existing_config.items()
+            if k in GamificationConfigCreate.model_fields
+        }
+        config_fields["profile_completion_journey_id"] = journey_id
+        await gamif_config_crud.upsert_config(
+            db, org_uuid, GamificationConfigCreate(**config_fields)
+        )
+
+    elif payload.is_onboarding is False:
+        # Clear profile_completion_journey_id
+        org_uuid = UUID(org_id)
+        await gamif_config_crud.update_config(
+            db,
+            org_uuid,
+            GamificationConfigUpdate(profile_completion_journey_id=None),
+        )
 
     journey = await crud.get_journey_admin(db, journey_id)
     return journey

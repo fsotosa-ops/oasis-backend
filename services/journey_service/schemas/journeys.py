@@ -201,6 +201,7 @@ class JourneyUpdate(BaseModel):
     category: str | None = None
     is_active: bool | None = None
     metadata: dict[str, Any] | None = None
+    is_onboarding: bool | None = None
 
 
 class JourneyAdminRead(BaseModel):
