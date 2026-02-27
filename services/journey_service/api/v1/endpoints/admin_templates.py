@@ -1,14 +1,14 @@
 """
 Template endpoints para crear journeys pre-configurados out-of-the-box.
 Actualmente soporta:
-  POST /admin/templates/onboarding  — crea el Journey de Onboarding de Perfil CRM
+  POST /{org_id}/admin/journeys/templates/onboarding  — crea el Journey de Onboarding de Perfil CRM
 """
 from uuid import UUID
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from common.auth.security import AdminUser
+from common.auth.security import OrgRoleRequired
 from common.database.client import get_admin_client
 from fastapi import Depends
 from services.gamification_service.crud import config as gamif_config_crud
@@ -23,6 +23,8 @@ from services.journey_service.schemas.journeys import (
 from supabase import AsyncClient
 
 router = APIRouter()
+
+AdminRequired = OrgRoleRequired("owner", "admin")
 
 # ---------------------------------------------------------------------------
 # Template definition: 4 steps agrupados para el Journey de Onboarding
@@ -59,17 +61,13 @@ _ONBOARDING_STEPS = [
 ]
 
 
-class OnboardingTemplateRequest(BaseModel):
-    org_id: str
-
-
 class OnboardingTemplateResponse(BaseModel):
     journey: JourneyAdminRead
     already_existed: bool
 
 
 @router.post(
-    "/admin/templates/onboarding",
+    "/{org_id}/admin/journeys/templates/onboarding",
     response_model=OnboardingTemplateResponse,
     status_code=200,
     summary="Crear Journey de Onboarding de Perfil CRM",
@@ -80,11 +78,10 @@ class OnboardingTemplateResponse(BaseModel):
     ),
 )
 async def create_onboarding_template(
-    payload: OnboardingTemplateRequest,
-    _admin: AdminUser,
+    org_id: str,
+    _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ) -> dict:
-    org_id = payload.org_id
     org_uuid = UUID(org_id)
 
     # 1. Verificar si ya existe journey configurado
