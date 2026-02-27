@@ -38,7 +38,7 @@ async def upsert_config(
 async def update_config(
     db: AsyncClient, org_id: UUID, payload: GamificationConfigUpdate
 ) -> dict | None:
-    updates = payload.model_dump(exclude_none=True, mode="json")
+    updates = payload.model_dump(exclude_unset=True, mode="json")
     if not updates:
         return await get_config(db, org_id)
 

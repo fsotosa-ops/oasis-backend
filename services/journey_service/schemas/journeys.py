@@ -186,6 +186,7 @@ class JourneyCreate(BaseModel):
     slug: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-z0-9-]+$")
     description: str | None = None
     thumbnail_url: str | None = None
+    category: str | None = None
     is_active: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -197,6 +198,7 @@ class JourneyUpdate(BaseModel):
     )
     description: str | None = None
     thumbnail_url: str | None = None
+    category: str | None = None
     is_active: bool | None = None
     metadata: dict[str, Any] | None = None
 
@@ -208,6 +210,7 @@ class JourneyAdminRead(BaseModel):
     slug: str
     description: str | None = None
     thumbnail_url: str | None = None
+    category: str | None = None
     is_active: bool
     metadata: dict = Field(default_factory=dict)
     created_at: datetime

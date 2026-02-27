@@ -139,6 +139,7 @@ async def create_journey(
         "slug": journey.slug,
         "description": journey.description,
         "thumbnail_url": journey.thumbnail_url,
+        "category": journey.category,
         "is_active": journey.is_active,
         "metadata": journey.metadata,
     }
@@ -163,7 +164,7 @@ async def update_journey(
     journey_id: UUID,
     journey: JourneyUpdate,
 ) -> dict:
-    payload = {k: v for k, v in journey.model_dump().items() if v is not None}
+    payload = journey.model_dump(exclude_unset=True)
 
     if not payload:
         response = (
