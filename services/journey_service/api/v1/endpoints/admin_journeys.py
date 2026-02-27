@@ -120,6 +120,13 @@ async def update_journey(
 
     # Handle is_onboarding flag atomically
     if payload.is_onboarding is True:
+        # Set metadata.is_onboarding so the member-facing page routes to JourneyWizard
+        current_metadata = updated.get("metadata") or {}
+        current_metadata["is_onboarding"] = True
+        await db.schema("journeys").table("journeys").update(
+            {"metadata": current_metadata}
+        ).eq("id", str(journey_id)).execute()
+
         # Add template steps if none of type profile_field exist
         existing_steps = await crud.get_steps_by_journey(db, journey_id)
         has_profile_steps = any(
@@ -159,6 +166,13 @@ async def update_journey(
         )
 
     elif payload.is_onboarding is False:
+        # Clear metadata.is_onboarding flag
+        current_metadata = updated.get("metadata") or {}
+        current_metadata.pop("is_onboarding", None)
+        await db.schema("journeys").table("journeys").update(
+            {"metadata": current_metadata}
+        ).eq("id", str(journey_id)).execute()
+
         # Clear profile_completion_journey_id
         org_uuid = UUID(org_id)
         await gamif_config_crud.update_config(
