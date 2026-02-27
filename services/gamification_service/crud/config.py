@@ -42,10 +42,16 @@ async def update_config(
     if not updates:
         return await get_config(db, org_id)
 
+    # Use upsert so PATCH works even when no config row exists yet for this org
+    existing = await get_config(db, org_id) or {}
+    org_id_str = str(org_id)
+    merged: dict = {**existing, **updates, "organization_id": org_id_str}
+    for key in ("id", "created_at", "updated_at"):
+        merged.pop(key, None)
+
     response = (
         await db.schema("journeys").table("gamification_config")
-        .update(updates)
-        .eq("organization_id", str(org_id))
+        .upsert(merged, on_conflict="organization_id")
         .select("*")
         .execute()
     )
