@@ -165,6 +165,7 @@ async def update_journey(
     journey: JourneyUpdate,
 ) -> dict:
     payload = journey.model_dump(exclude_unset=True)
+    payload.pop("is_onboarding", None)
 
     if not payload:
         response = (
