@@ -24,11 +24,12 @@ async def upsert_config(
 ) -> dict:
     data = {
         "organization_id": str(org_id),
-        **payload.model_dump(),
+        **payload.model_dump(mode="json"),
     }
     response = (
         await db.schema("journeys").table("gamification_config")
         .upsert(data, on_conflict="organization_id")
+        .select("*")
         .execute()
     )
     return response.data[0] if response.data else {}
@@ -37,7 +38,7 @@ async def upsert_config(
 async def update_config(
     db: AsyncClient, org_id: UUID, payload: GamificationConfigUpdate
 ) -> dict | None:
-    updates = payload.model_dump(exclude_none=True)
+    updates = payload.model_dump(exclude_none=True, mode="json")
     if not updates:
         return await get_config(db, org_id)
 
@@ -45,6 +46,7 @@ async def update_config(
         await db.schema("journeys").table("gamification_config")
         .update(updates)
         .eq("organization_id", str(org_id))
+        .select("*")
         .execute()
     )
     return response.data[0] if response.data else None
