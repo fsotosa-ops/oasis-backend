@@ -66,6 +66,10 @@ class OnboardingTemplateResponse(BaseModel):
     already_existed: bool
 
 
+class ApplyStepsResponse(BaseModel):
+    steps_added: int
+
+
 @router.post(
     "/{org_id}/admin/journeys/templates/onboarding",
     response_model=OnboardingTemplateResponse,
@@ -154,3 +158,38 @@ async def create_onboarding_template(
         "journey": full_journey,
         "already_existed": False,
     }
+
+
+@router.post(
+    "/{org_id}/admin/journeys/{journey_id}/templates/onboarding/steps",
+    response_model=ApplyStepsResponse,
+    status_code=200,
+    summary="Agregar steps del template de Onboarding a un journey existente",
+    description=(
+        "Agrega los 4 steps de perfil CRM (trayectoria, ubicación, datos personales, contacto) "
+        "al final de un journey existente. No modifica la configuración de gamification."
+    ),
+)
+async def apply_onboarding_steps(
+    org_id: str,
+    journey_id: str,
+    _ctx=Depends(AdminRequired),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+) -> dict:
+    journey_uuid = UUID(journey_id)
+
+    for step_def in _ONBOARDING_STEPS:
+        step_create = StepCreate(
+            title=step_def["title"],
+            type="profile_field",
+            order_index=None,  # auto: se agrega al final
+            config={
+                "field_names": step_def["field_names"],
+                "description": step_def["description"],
+                "icon": step_def["icon"],
+            },
+            gamification_rules=GamificationRules(base_points=step_def["points"]),
+        )
+        await steps_crud.create_step(db, journey_uuid, step_create)
+
+    return {"steps_added": len(_ONBOARDING_STEPS)}
