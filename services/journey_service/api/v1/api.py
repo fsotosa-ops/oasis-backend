@@ -5,6 +5,7 @@ from services.journey_service.api.v1.endpoints import (
     admin_journey_organizations,
     admin_journeys,
     admin_steps,
+    admin_templates,
     enrollments,
     journeys,
     user,
@@ -16,6 +17,7 @@ api_router = APIRouter()
 # path parameter conflicts (e.g. /me/... vs /{org_id}/...)
 api_router.include_router(user.router, tags=["User Journeys"])
 api_router.include_router(journeys.router, tags=["Journeys"])
+api_router.include_router(admin_templates.router, tags=["Admin Templates"])
 api_router.include_router(admin_journeys.router, tags=["Admin Journeys"])
 api_router.include_router(admin_steps.router, tags=["Admin Steps"])
 api_router.include_router(admin_journey_organizations.router, tags=["Admin Journey Organizations"])

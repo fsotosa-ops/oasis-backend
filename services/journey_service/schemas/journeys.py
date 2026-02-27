@@ -10,6 +10,7 @@ StepType = Literal[
     "milestone",
     "social_interaction",
     "resource_consumption",
+    "profile_field",
 ]
 
 
@@ -61,6 +62,17 @@ class SocialInteractionConfig(BaseModel):
     description: str | None = None
 
 
+class ProfileFieldStepConfig(BaseModel):
+    """Config para steps de tipo profile_field en el Journey de Onboarding."""
+    field_names: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Nombres de campos CRM que cubre este step, e.g. ['gender'] o ['country', 'state', 'city']",
+    )
+    description: str | None = None
+    icon: str | None = None  # emoji o nombre de ícono
+
+
 _STEP_CONFIG_SCHEMAS: dict[str, type[BaseModel]] = {
     "survey": SurveyConfig,
     "content_view": ContentViewConfig,
@@ -68,6 +80,7 @@ _STEP_CONFIG_SCHEMAS: dict[str, type[BaseModel]] = {
     "milestone": MilestoneConfig,
     "event_attendance": EventAttendanceConfig,
     "social_interaction": SocialInteractionConfig,
+    "profile_field": ProfileFieldStepConfig,
 }
 
 

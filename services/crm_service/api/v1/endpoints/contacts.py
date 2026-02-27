@@ -20,6 +20,7 @@ from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from services.gamification_service.crud import config as gamif_config_crud
+from services.journey_service.crud import steps as journey_steps_crud
 from services.journey_service.crud.enrollments import (
     complete_step as complete_journey_step,
     create_enrollment,
@@ -121,6 +122,82 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
         user_id, step_id_str, journey_id_str, filled,
     )
 
+async def _try_complete_profile_field_steps(db: AsyncClient, user_id: str, contact: dict) -> None:
+    """Auto-completa steps de tipo profile_field cuyas field_names ya están todas llenas.
+
+    Flujo:
+    1. Busca la org del usuario.
+    2. Lee gamification_config para obtener profile_completion_journey_id.
+    3. Obtiene todos los steps de ese journey.
+    4. Para cada step de tipo profile_field: si todos sus field_names tienen valor en el contacto
+       → marca el step como completado (idempotente).
+    """
+    # 1. Buscar organización
+    membership = (
+        await db.table("organization_members")
+        .select("organization_id")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .order("joined_at")
+        .limit(1)
+        .execute()
+    )
+    if not membership.data:
+        return
+    org_id_str = membership.data[0]["organization_id"]
+    org_id = UUID(org_id_str)
+
+    # 2. Leer config de gamificación
+    config = await gamif_config_crud.get_config(db, org_id)
+    journey_id_str = (config or {}).get("profile_completion_journey_id")
+    if not journey_id_str:
+        return
+
+    journey_id = UUID(journey_id_str)
+    user_uuid = UUID(user_id)
+
+    # 3. Obtener steps del journey de onboarding
+    steps = await journey_steps_crud.list_steps(db, journey_id)
+    profile_field_steps = [s for s in steps if s.get("type") == "profile_field"]
+    if not profile_field_steps:
+        return
+
+    # 4. Obtener o crear enrollment
+    enrollment = await get_active_enrollment(db, user_uuid, journey_id)
+    if not enrollment:
+        enrollment = await create_enrollment(db, user_uuid, journey_id)
+        logger.info("profile_field: user=%s enrolled in onboarding journey=%s", user_id, journey_id_str)
+
+    enrollment_id = UUID(enrollment["id"])
+
+    # 5. Para cada step profile_field: verificar si todos sus campos están llenos
+    for step in profile_field_steps:
+        step_id = UUID(step["id"])
+        step_config = step.get("config") or {}
+        field_names: list[str] = step_config.get("field_names", [])
+
+        if not field_names:
+            continue
+
+        all_filled = all(bool(contact.get(f)) for f in field_names)
+        if not all_filled:
+            continue
+
+        if await is_step_already_completed(db, enrollment_id, step_id):
+            continue
+
+        await complete_journey_step(
+            db,
+            enrollment_id,
+            step_id,
+            metadata={"trigger": "profile_field_auto_complete", "fields": field_names},
+        )
+        logger.info(
+            "profile_field: user=%s auto-completed step=%s fields=%s",
+            user_id, str(step_id), field_names,
+        )
+
+
 router = APIRouter()
 
 
@@ -211,6 +288,12 @@ async def update_my_contact(
         raise NotFoundError("Contact")
 
     saved_contact = result.data[0]
+
+    # Auto-completar steps de tipo profile_field cubiertos por los campos guardados
+    try:
+        await _try_complete_profile_field_steps(db, user_id, saved_contact)
+    except Exception:
+        logger.exception("profile_field: unexpected error for user=%s", user_id)
 
     # Intentar otorgar puntos de gamificación por completitud de perfil (fire & forget)
     try:
