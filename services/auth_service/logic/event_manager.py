@@ -43,6 +43,9 @@ class EventManager:
     async def create_event(token: str, org_id: str, data: dict) -> dict:
         """Crea un evento para la organización."""
         client = await get_scoped_client(token)
+        # Ensure journey_ids is a list of strings (mode='json' already converts UUIDs)
+        if "journey_ids" in data and data["journey_ids"] is not None:
+            data["journey_ids"] = [str(j) for j in data["journey_ids"]]
         payload = {**data, "organization_id": org_id}
         response = (
             await client.schema("crm").table("org_events")
@@ -55,6 +58,9 @@ class EventManager:
     async def update_event(token: str, org_id: str, event_id: str, data: dict) -> dict:
         """Actualiza un evento."""
         client = await get_scoped_client(token)
+        # Ensure journey_ids is a list of strings
+        if "journey_ids" in data and data["journey_ids"] is not None:
+            data["journey_ids"] = [str(j) for j in data["journey_ids"]]
         response = (
             await client.schema("crm").table("org_events")
             .update(data)
@@ -111,10 +117,33 @@ class EventManager:
             raise NotFoundError("Evento")
 
         event = event_response.data
+        journey_ids: list[str] = event.get("journey_ids") or []
+
+        # Fetch journey titles for the UI (best-effort)
+        journey_summaries: list[dict] = []
+        if journey_ids:
+            try:
+                journeys_response = (
+                    await admin.schema("journeys").table("journeys")
+                    .select("id, title")
+                    .in_("id", journey_ids)
+                    .execute()
+                )
+                if journeys_response.data:
+                    # Preserve order from journey_ids
+                    journey_map = {j["id"]: j["title"] for j in journeys_response.data}
+                    journey_summaries = [
+                        {"id": jid, "title": journey_map[jid]}
+                        for jid in journey_ids
+                        if jid in journey_map
+                    ]
+            except Exception:
+                logger.warning("Could not fetch journey summaries for event %s", event["id"])
 
         return {
             **event,
             "org_id": org["id"],
             "org_slug": org["slug"],
             "org_name": org["name"],
+            "journey_summaries": journey_summaries,
         }

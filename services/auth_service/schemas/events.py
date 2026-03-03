@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import UUID4, BaseModel, Field
 
@@ -19,6 +19,10 @@ class LandingConfig(BaseModel):
     welcome_message: Optional[str] = None
     primary_color: str = "#3B82F6"
     background_color: str = "#0F172A"
+    background_end_color: Optional[str] = None
+    gradient_direction: Optional[str] = "to-b"
+    background_image_url: Optional[str] = None
+    text_color: Optional[str] = "#FFFFFF"
     show_qr: bool = True
     custom_logo_url: Optional[str] = None
 
@@ -31,8 +35,10 @@ class EventCreate(BaseModel):
     end_date: Optional[datetime] = None
     location: Optional[str] = None
     status: EventStatus = EventStatus.upcoming
-    journey_id: Optional[UUID4] = None
+    journey_ids: List[UUID4] = []
     landing_config: LandingConfig = Field(default_factory=LandingConfig)
+    notes: Optional[str] = None
+    expected_participants: Optional[int] = None
 
 
 class EventUpdate(BaseModel):
@@ -42,15 +48,17 @@ class EventUpdate(BaseModel):
     end_date: Optional[datetime] = None
     location: Optional[str] = None
     status: Optional[EventStatus] = None
-    journey_id: Optional[UUID4] = None
+    journey_ids: Optional[List[UUID4]] = None
     landing_config: Optional[LandingConfig] = None
     is_active: Optional[bool] = None
+    notes: Optional[str] = None
+    expected_participants: Optional[int] = None
 
 
 class EventResponse(BaseModel):
     id: str
     organization_id: str
-    journey_id: Optional[str] = None
+    journey_ids: List[str] = []
     name: str
     slug: str
     description: Optional[str] = None
@@ -60,8 +68,15 @@ class EventResponse(BaseModel):
     status: EventStatus
     landing_config: LandingConfig
     is_active: bool
+    notes: Optional[str] = None
+    expected_participants: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+
+
+class JourneySummary(BaseModel):
+    id: str
+    title: str
 
 
 class PublicEventResponse(BaseModel):
@@ -78,4 +93,5 @@ class PublicEventResponse(BaseModel):
     location: Optional[str] = None
     status: EventStatus
     landing_config: LandingConfig
-    journey_id: Optional[str] = None
+    journey_ids: List[str] = []
+    journey_summaries: List[JourneySummary] = []

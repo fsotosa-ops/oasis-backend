@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS crm.org_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    journey_id      UUID REFERENCES journeys.journeys(id) ON DELETE SET NULL,
+    journey_ids     UUID[] NOT NULL DEFAULT '{}',
     name            TEXT NOT NULL,
     slug            TEXT NOT NULL,
     description     TEXT,
@@ -14,11 +14,17 @@ CREATE TABLE IF NOT EXISTS crm.org_events (
     location        TEXT,
     status          TEXT NOT NULL DEFAULT 'upcoming'
                     CHECK (status IN ('upcoming', 'live', 'past', 'cancelled')),
+    notes                 TEXT,
+    expected_participants INTEGER,
     landing_config  JSONB NOT NULL DEFAULT '{
         "title": null,
         "welcome_message": null,
         "primary_color": "#3B82F6",
         "background_color": "#0F172A",
+        "background_end_color": null,
+        "gradient_direction": "to-b",
+        "background_image_url": null,
+        "text_color": "#FFFFFF",
         "show_qr": true,
         "custom_logo_url": null
     }'::jsonb,
