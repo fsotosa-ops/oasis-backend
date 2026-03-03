@@ -20,7 +20,7 @@ async def get_active_enrollment(
 
 
 async def create_enrollment(
-    db: AsyncClient, user_id: UUID, journey_id: UUID
+    db: AsyncClient, user_id: UUID, journey_id: UUID, event_id: UUID | None = None
 ) -> dict:
     payload = {
         "user_id": str(user_id),
@@ -28,6 +28,8 @@ async def create_enrollment(
         "status": "active",
         "current_step_index": 0,
     }
+    if event_id is not None:
+        payload["event_id"] = str(event_id)
 
     response = await db.schema("journeys").table("enrollments").insert(payload).execute()
     return response.data[0]

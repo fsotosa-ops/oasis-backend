@@ -21,7 +21,6 @@ class OrgType(StrEnum):
     community = "community"
     provider = "provider"
     sponsor = "sponsor"
-    enterprise = "enterprise"
 
 
 class MemberRole(StrEnum):

@@ -1,11 +1,12 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import UUID4, BaseModel, Field
 
 
 class EnrollmentCreate(BaseModel):
     journey_id: UUID4 = Field(..., description="ID del Journey a iniciar.")
+    event_id: Optional[UUID4] = Field(None, description="ID del evento que originó esta inscripción (trazabilidad QR).")
 
 
 class EnrollmentResponse(BaseModel):
@@ -13,6 +14,7 @@ class EnrollmentResponse(BaseModel):
     user_id: UUID4
     journey_id: UUID4
     organization_id: UUID4 | None = None
+    event_id: UUID4 | None = None
     journey_title: str | None = None
     status: str
     current_step_index: int

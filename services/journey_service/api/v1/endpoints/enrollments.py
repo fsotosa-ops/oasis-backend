@@ -37,13 +37,14 @@ async def enroll_user(
         raise ConflictError("Ya tienes una inscripcion activa en este Journey.")
 
     new_enrollment = await crud.create_enrollment(
-        db, user_id, payload.journey_id
+        db, user_id, payload.journey_id, event_id=payload.event_id
     )
 
     return EnrollmentResponse(
         id=new_enrollment["id"],
         user_id=new_enrollment["user_id"],
         journey_id=new_enrollment["journey_id"],
+        event_id=new_enrollment.get("event_id"),
         status=new_enrollment["status"],
         current_step_index=new_enrollment["current_step_index"],
         progress_percentage=0.0,
