@@ -16,7 +16,7 @@ from services.crm_service.dependencies import (
     CrmReadAccess,
     CrmWriteAccess,
 )
-from services.crm_service.schemas.contacts import ContactResponse, ContactUpdate, PaginatedContactsResponse
+from services.crm_service.schemas.contacts import ContactEventParticipation, ContactResponse, ContactUpdate, PaginatedContactsResponse
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from services.gamification_service.crud import config as gamif_config_crud
@@ -458,4 +458,25 @@ async def get_contact_changes(
         .limit(limit)
     )
     result = await query.execute()
+    return result.data or []
+
+
+# ---------------------------------------------------------------------------
+# Event participation (cross-schema: journeys.enrollments + public.org_events)
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{user_id}/events",
+    response_model=list[ContactEventParticipation],
+    summary="Eventos en los que participó un contacto",
+)
+async def get_contact_events(
+    user_id: UUID,
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Retorna los eventos vinculados al contacto a través de sus enrollments con event_id."""
+    result = await db.rpc(
+        "get_contact_events",
+        {"p_user_id": str(user_id)},
+    ).execute()
     return result.data or []
