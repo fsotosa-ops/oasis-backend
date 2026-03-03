@@ -13,6 +13,7 @@ from services.journey_service.schemas.enrollments import (
     StepCompleteRequest,
     StepCompleteResponse,
     StepProgressRead,
+    UpdateEnrollmentEventRequest,
 )
 from supabase import AsyncClient
 
@@ -269,3 +270,35 @@ async def resume_enrollment(
     updated = await crud.update_enrollment_status(db, enrollment_id, "active")
 
     return EnrollmentResponse(**updated)
+
+
+@router.patch(
+    "/by-journey/{journey_id}/event",
+    response_model=EnrollmentResponse,
+    summary="Actualizar evento de re-asistencia",
+)
+async def update_enrollment_event(
+    journey_id: UUID,
+    payload: UpdateEnrollmentEventRequest,
+    current_user: CurrentUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Actualiza el event_id del enrollment activo del usuario para un journey.
+    Usado cuando el mismo usuario re-asiste con un evento diferente del mismo journey."""
+    user_id = UUID(str(current_user.id))
+
+    updated = await crud.update_enrollment_event(db, user_id, journey_id, payload.event_id)
+    if not updated:
+        raise NotFoundError("Enrollment activo para este journey")
+
+    return EnrollmentResponse(
+        id=updated["id"],
+        user_id=updated["user_id"],
+        journey_id=updated["journey_id"],
+        event_id=updated.get("event_id"),
+        status=updated["status"],
+        current_step_index=updated["current_step_index"],
+        progress_percentage=updated.get("progress_percentage", 0.0),
+        started_at=updated["started_at"],
+        completed_at=updated.get("completed_at"),
+    )

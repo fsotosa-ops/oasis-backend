@@ -15,7 +15,7 @@ class EventManager:
         """Lista todos los eventos de una organización."""
         client = await get_scoped_client(token)
         response = (
-            await client.table("org_events")
+            await client.schema("crm").table("org_events")
             .select("*")
             .eq("organization_id", org_id)
             .order("created_at", desc=True)
@@ -28,7 +28,7 @@ class EventManager:
         """Obtiene un evento por ID (verifica que pertenece a la org)."""
         client = await get_scoped_client(token)
         response = (
-            await client.table("org_events")
+            await client.schema("crm").table("org_events")
             .select("*")
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -45,7 +45,7 @@ class EventManager:
         client = await get_scoped_client(token)
         payload = {**data, "organization_id": org_id}
         response = (
-            await client.table("org_events")
+            await client.schema("crm").table("org_events")
             .insert(payload)
             .execute()
         )
@@ -56,7 +56,7 @@ class EventManager:
         """Actualiza un evento."""
         client = await get_scoped_client(token)
         response = (
-            await client.table("org_events")
+            await client.schema("crm").table("org_events")
             .update(data)
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -71,7 +71,7 @@ class EventManager:
         """Elimina un evento."""
         client = await get_scoped_client(token)
         await (
-            client.table("org_events")
+            client.schema("crm").table("org_events")
             .delete()
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -99,7 +99,7 @@ class EventManager:
 
         # Fetch the active event
         event_response = (
-            await admin.table("org_events")
+            await admin.schema("crm").table("org_events")
             .select("*")
             .eq("organization_id", org["id"])
             .eq("slug", event_slug)

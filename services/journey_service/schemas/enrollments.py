@@ -63,6 +63,10 @@ class EnrollmentDetailResponse(BaseModel):
         from_attributes = True
 
 
+class UpdateEnrollmentEventRequest(BaseModel):
+    event_id: UUID4 = Field(..., description="Nuevo event_id para el enrollment activo del usuario en este journey.")
+
+
 class StepCompleteRequest(BaseModel):
     metadata: dict | None = None
     external_reference: str | None = None

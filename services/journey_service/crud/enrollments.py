@@ -373,6 +373,22 @@ async def is_step_already_completed(
     return len(response.data) > 0 if response.data else False
 
 
+async def update_enrollment_event(
+    db: AsyncClient, user_id: UUID, journey_id: UUID, event_id: UUID
+) -> dict | None:
+    """Actualiza el event_id del enrollment activo del usuario para un journey.
+    Usado cuando el mismo usuario re-asiste con un evento diferente del mismo journey."""
+    response = (
+        await db.schema("journeys").table("enrollments")
+        .update({"event_id": str(event_id)})
+        .eq("user_id", str(user_id))
+        .eq("journey_id", str(journey_id))
+        .in_("status", ["active", "completed"])
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
 async def verify_step_in_enrollment_journey(
     db: AsyncClient, enrollment_id: UUID, step_id: UUID
 ) -> bool:

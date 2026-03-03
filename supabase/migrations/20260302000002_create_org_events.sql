@@ -1,9 +1,8 @@
--- Migration: Create org_events table
+-- Migration: Create org_events table in crm schema
 -- Implements the "QR Eterno" principle: permanent URLs per org+event slug pair
+-- Uses TEXT + CHECK instead of ENUM (avoids ALTER TYPE issues like with org_type)
 
-CREATE TYPE event_status AS ENUM ('upcoming', 'live', 'past', 'cancelled');
-
-CREATE TABLE IF NOT EXISTS public.org_events (
+CREATE TABLE IF NOT EXISTS crm.org_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
     journey_id      UUID REFERENCES journeys.journeys(id) ON DELETE SET NULL,
@@ -13,7 +12,8 @@ CREATE TABLE IF NOT EXISTS public.org_events (
     start_date      TIMESTAMPTZ,
     end_date        TIMESTAMPTZ,
     location        TEXT,
-    status          event_status NOT NULL DEFAULT 'upcoming',
+    status          TEXT NOT NULL DEFAULT 'upcoming'
+                    CHECK (status IN ('upcoming', 'live', 'past', 'cancelled')),
     landing_config  JSONB NOT NULL DEFAULT '{
         "title": null,
         "welcome_message": null,
@@ -30,34 +30,34 @@ CREATE TABLE IF NOT EXISTS public.org_events (
 );
 
 -- Auto-update updated_at on any change
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER org_events_updated_at
-    BEFORE UPDATE ON public.org_events
-    FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS crm_org_events_updated_at ON crm.org_events;
+CREATE TRIGGER crm_org_events_updated_at
+    BEFORE UPDATE ON crm.org_events
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Enable RLS
-ALTER TABLE public.org_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.org_events ENABLE ROW LEVEL SECURITY;
 
 -- Public can read active events (needed for QR landing + projection screen, no auth required)
-CREATE POLICY "events_public_read" ON public.org_events
+DROP POLICY IF EXISTS "events_public_read" ON crm.org_events;
+CREATE POLICY "events_public_read" ON crm.org_events
     FOR SELECT
     USING (is_active = TRUE);
 
 -- Org owners/admins can manage events
-CREATE POLICY "events_admin_write" ON public.org_events
+DROP POLICY IF EXISTS "events_admin_write" ON crm.org_events;
+CREATE POLICY "events_admin_write" ON crm.org_events
     FOR ALL
     USING (
         EXISTS (
             SELECT 1 FROM public.organization_members om
-            WHERE om.organization_id = org_events.organization_id
+            WHERE om.organization_id = crm.org_events.organization_id
               AND om.user_id = auth.uid()
               AND om.role IN ('owner', 'admin')
         )
     );
+
+-- Grants
+GRANT ALL ON crm.org_events TO service_role;
+GRANT SELECT ON crm.org_events TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON crm.org_events TO authenticated;
