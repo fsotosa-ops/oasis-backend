@@ -42,6 +42,21 @@ class PaginatedContactsResponse(BaseModel):
     count: int
 
 
+class ContactEventParticipation(BaseModel):
+    enrollment_id: str
+    enrollment_status: str
+    enrolled_at: Optional[datetime] = None
+    event_id: str
+    event_name: str
+    event_slug: str
+    event_status: str
+    event_start_date: Optional[datetime] = None
+    event_location: Optional[str] = None
+    org_id: str
+    org_name: str
+    org_slug: str
+
+
 # ---------------------------------------------------------------------------
 # Field Options (configurable select options for gender, education, occupation)
 # ---------------------------------------------------------------------------
