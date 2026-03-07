@@ -14,17 +14,34 @@ class EventStatus(StrEnum):
     cancelled = "cancelled"
 
 
-class LandingConfig(BaseModel):
-    title: Optional[str] = None
-    welcome_message: Optional[str] = None
-    primary_color: str = "#3B82F6"
-    background_color: str = "#0F172A"
-    background_end_color: Optional[str] = None
-    gradient_direction: Optional[str] = "to-b"
-    background_image_url: Optional[str] = None
-    text_color: Optional[str] = "#FFFFFF"
-    show_qr: bool = True
-    custom_logo_url: Optional[str] = None
+class EventCounterpartDetails(BaseModel):
+    address: Optional[str] = None
+    full_entity_name: Optional[str] = None
+    entity_logo_url: Optional[str] = None
+    counterpart_details: Optional[str] = None
+    activity_schedule: Optional[str] = None
+    expected_ages: Optional[str] = None
+    expected_roles: Optional[str] = None
+    activity_modality: Optional[str] = None
+    specific_activity: Optional[str] = None
+
+
+class EventVenueDetails(BaseModel):
+    has_internet: bool = False
+    has_ac: bool = False
+    has_lighting: bool = False
+    has_technical_rider: bool = False
+    notes: Optional[str] = None
+
+
+class EventDiagnosis(BaseModel):
+    objective: Optional[str] = None
+    expectations: Optional[str] = None
+    historical_activities: Optional[str] = None
+    historical_incidents: Optional[str] = None
+    myths_stigmas: Optional[str] = None
+    community_leaders: Optional[str] = None
+    main_obstacles: Optional[str] = None
 
 
 class EventCreate(BaseModel):
@@ -36,9 +53,11 @@ class EventCreate(BaseModel):
     location: Optional[str] = None
     status: EventStatus = EventStatus.upcoming
     journey_ids: List[UUID4] = []
-    landing_config: LandingConfig = Field(default_factory=LandingConfig)
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
+    counterpart_details: EventCounterpartDetails = Field(default_factory=EventCounterpartDetails)
+    venue_details: EventVenueDetails = Field(default_factory=EventVenueDetails)
+    diagnosis: EventDiagnosis = Field(default_factory=EventDiagnosis)
 
 
 class EventUpdate(BaseModel):
@@ -49,10 +68,12 @@ class EventUpdate(BaseModel):
     location: Optional[str] = None
     status: Optional[EventStatus] = None
     journey_ids: Optional[List[UUID4]] = None
-    landing_config: Optional[LandingConfig] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
+    counterpart_details: Optional[EventCounterpartDetails] = None
+    venue_details: Optional[EventVenueDetails] = None
+    diagnosis: Optional[EventDiagnosis] = None
 
 
 class EventResponse(BaseModel):
@@ -66,32 +87,11 @@ class EventResponse(BaseModel):
     end_date: Optional[datetime] = None
     location: Optional[str] = None
     status: EventStatus
-    landing_config: LandingConfig
     is_active: bool
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
+    counterpart_details: EventCounterpartDetails = Field(default_factory=EventCounterpartDetails)
+    venue_details: EventVenueDetails = Field(default_factory=EventVenueDetails)
+    diagnosis: EventDiagnosis = Field(default_factory=EventDiagnosis)
     created_at: datetime
     updated_at: datetime
-
-
-class JourneySummary(BaseModel):
-    id: str
-    title: str
-
-
-class PublicEventResponse(BaseModel):
-    """Endpoint público — no expone IDs internos sensibles innecesariamente."""
-    id: str
-    name: str
-    slug: str
-    org_id: str
-    org_slug: str
-    org_name: str
-    description: Optional[str] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    location: Optional[str] = None
-    status: EventStatus
-    landing_config: LandingConfig
-    journey_ids: List[str] = []
-    journey_summaries: List[JourneySummary] = []

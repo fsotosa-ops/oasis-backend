@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from common.database.client import get_admin_client, get_scoped_client
+from common.database.client import get_scoped_client
 from common.exceptions import NotFoundError
 
 logger = logging.getLogger("oasis.event_manager")
@@ -84,66 +84,3 @@ class EventManager:
             .execute()
         )
 
-    @staticmethod
-    async def get_public_event(org_slug: str, event_slug: str) -> dict:
-        """Obtiene un evento activo por slugs de org y evento (sin auth).
-        Hace JOIN con organizations para resolver los slugs."""
-        admin = await get_admin_client()
-
-        # Resolve org by slug
-        org_response = (
-            await admin.table("organizations")
-            .select("id, name, slug")
-            .eq("slug", org_slug)
-            .single()
-            .execute()
-        )
-        if not org_response.data:
-            raise NotFoundError("Organización")
-
-        org = org_response.data
-
-        # Fetch the active event
-        event_response = (
-            await admin.schema("crm").table("org_events")
-            .select("*")
-            .eq("organization_id", org["id"])
-            .eq("slug", event_slug)
-            .eq("is_active", True)
-            .single()
-            .execute()
-        )
-        if not event_response.data:
-            raise NotFoundError("Evento")
-
-        event = event_response.data
-        journey_ids: list[str] = event.get("journey_ids") or []
-
-        # Fetch journey titles for the UI (best-effort)
-        journey_summaries: list[dict] = []
-        if journey_ids:
-            try:
-                journeys_response = (
-                    await admin.schema("journeys").table("journeys")
-                    .select("id, title")
-                    .in_("id", journey_ids)
-                    .execute()
-                )
-                if journeys_response.data:
-                    # Preserve order from journey_ids
-                    journey_map = {j["id"]: j["title"] for j in journeys_response.data}
-                    journey_summaries = [
-                        {"id": jid, "title": journey_map[jid]}
-                        for jid in journey_ids
-                        if jid in journey_map
-                    ]
-            except Exception:
-                logger.warning("Could not fetch journey summaries for event %s", event["id"])
-
-        return {
-            **event,
-            "org_id": org["id"],
-            "org_slug": org["slug"],
-            "org_name": org["name"],
-            "journey_summaries": journey_summaries,
-        }
