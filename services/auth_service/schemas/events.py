@@ -20,8 +20,8 @@ class EventCounterpartDetails(BaseModel):
     entity_logo_url: Optional[str] = None
     counterpart_details: Optional[str] = None
     activity_schedule: Optional[str] = None
-    expected_ages: Optional[str] = None
-    expected_roles: Optional[str] = None
+    expected_ages: Optional[List[str]] = None
+    expected_roles: Optional[List[str]] = None
     activity_modality: Optional[str] = None
     specific_activity: Optional[str] = None
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from common.database.client import get_scoped_client
+from common.database.client import get_admin_client, get_scoped_client
 from common.exceptions import NotFoundError
 
 logger = logging.getLogger("oasis.event_manager")
@@ -32,6 +32,21 @@ class EventManager:
             .select("*")
             .eq("id", event_id)
             .eq("organization_id", org_id)
+            .single()
+            .execute()
+        )
+        if not response.data:
+            raise NotFoundError("Evento")
+        return response.data
+
+    @staticmethod
+    async def get_event_by_id(event_id: str) -> dict:
+        """Obtiene un evento por ID sin requerir membresía en la org (gateway público autenticado)."""
+        db = await get_admin_client()
+        response = (
+            await db.schema("crm").table("org_events")
+            .select("*")
+            .eq("id", event_id)
             .single()
             .execute()
         )

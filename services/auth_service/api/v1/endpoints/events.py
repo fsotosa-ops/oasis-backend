@@ -5,7 +5,7 @@ Requires owner or admin role in the organization.
 """
 from fastapi import APIRouter, Depends, status
 
-from common.auth.security import OrgContext, OrgRoleRequired, get_current_token
+from common.auth.security import CurrentUser, OrgContext, OrgRoleRequired, get_current_token
 from services.auth_service.logic.event_manager import EventManager
 from services.auth_service.schemas.events import (
     EventCreate,
@@ -14,6 +14,18 @@ from services.auth_service.schemas.events import (
 )
 
 router = APIRouter()
+
+# Router no org-scoped: cualquier usuario autenticado puede consultar un evento por ID
+event_gateway_router = APIRouter()
+
+
+@event_gateway_router.get("/{event_id}", response_model=EventResponse)
+async def get_event_by_id(
+    event_id: str,
+    current_user: CurrentUser,  # noqa: ARG001 — solo verifica autenticación
+):
+    """Obtiene info básica de un evento por ID (usado por el gateway del evento)."""
+    return await EventManager.get_event_by_id(event_id)
 
 
 @router.get("", response_model=list[EventResponse])
