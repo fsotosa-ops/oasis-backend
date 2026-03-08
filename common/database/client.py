@@ -16,7 +16,7 @@ _public_client: AsyncClient | None = None
 async def get_public_client() -> AsyncClient:
     global _public_client
     if not _public_client:
-        _public_client = await acreate_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+        _public_client = await acreate_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     return _public_client
 
 

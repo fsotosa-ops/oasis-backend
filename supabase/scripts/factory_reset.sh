@@ -48,15 +48,31 @@ for f in "$DROP_SQL" "$SEED_SQL"; do
     fi
 done
 
+# ─── Load .env if SUPABASE_DB_URL not already in environment ─────────────────
+if [ -z "${SUPABASE_DB_URL:-}" ]; then
+    # Look for .env in oasis-backend/ (SUPABASE_ROOT) and project root
+    for env_file in "$SUPABASE_ROOT/.env" "$SUPABASE_ROOT/../.env"; do
+        if [ -f "$env_file" ]; then
+            # Export only SUPABASE_DB_URL to avoid polluting environment
+            SUPABASE_DB_URL=$(grep -E '^SUPABASE_DB_URL=' "$env_file" | head -1 | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+            if [ -n "$SUPABASE_DB_URL" ]; then
+                echo -e "${YELLOW}ℹ️  Loaded SUPABASE_DB_URL from $env_file${NC}"
+                export SUPABASE_DB_URL
+                break
+            fi
+        fi
+    done
+fi
+
 # ─── Validate environment variable ───────────────────────────────────────────
 if [ -z "${SUPABASE_DB_URL:-}" ]; then
     echo -e "${RED}❌ SUPABASE_DB_URL is not set.${NC}"
     echo ""
-    echo "Get it from: Supabase Dashboard → Settings → Database → Connection string → URI"
+    echo "Add it to oasis-backend/.env:"
     echo ""
-    echo "Then export it:"
+    echo "  SUPABASE_DB_URL=postgresql://postgres.XXXX:PASSWORD@aws-0-XX.pooler.supabase.com:5432/postgres"
     echo ""
-    echo "  export SUPABASE_DB_URL=\"postgresql://postgres.XXXX:PASSWORD@aws-0-XX.pooler.supabase.com:5432/postgres\""
+    echo "Get the URL from: Supabase Dashboard → Settings → Database → Connection string → URI (Session mode)"
     echo ""
     exit 1
 fi

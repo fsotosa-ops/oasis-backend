@@ -48,18 +48,25 @@ class AuthManager:
 
     @staticmethod
     async def get_oauth_url(provider: str, redirect_to: str):
-        client = await get_public_client()
+        # Fresh client per OAuth flow so each user has an isolated PKCE code_verifier
+        from common.database.client import SUPABASE_URL, SUPABASE_ANON_KEY
+        from supabase import acreate_client
+        client = await acreate_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         res = await client.auth.sign_in_with_oauth({
             "provider": provider,
             "options": {"redirect_to": redirect_to},
         })
+        # Store the client so exchange_code_for_session can reuse the verifier
+        AuthManager._oauth_client = client
         return res.url
 
     @staticmethod
     async def exchange_code_for_session(code: str):
         """Intercambia un auth code (OAuth callback) por una sesión."""
-        client = await get_public_client()
+        # Reuse the same client that generated the OAuth URL to preserve PKCE verifier
+        client = getattr(AuthManager, "_oauth_client", None) or await get_public_client()
         res = await client.auth.exchange_code_for_session({"auth_code": code})
+        AuthManager._oauth_client = None  # Clear after successful exchange
         return res.session
 
     @staticmethod
