@@ -66,7 +66,7 @@ FOR EACH ROW EXECUTE FUNCTION public.auto_promote_platform_admin();
 -- =============================================================================
 INSERT INTO public.platform_admin_whitelist (email, note) VALUES
     ('tech@fsummer.org',    'Tech lead — Oasis platform'),
-    ('felipe@sumadots.com', 'Founder — Fundación Summer')
+    ('felipe@sumadots.com', 'Consultant — Growth Social Impact')
 ON CONFLICT (email) DO NOTHING;
 
 -- =============================================================================

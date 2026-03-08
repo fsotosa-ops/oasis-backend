@@ -35,7 +35,7 @@ DROP SCHEMA IF EXISTS audit     CASCADE;  -- CASCADE drops trg_audit_* triggers 
 -- 3. Public tables (in FK dependency order)
 --    public.org_events has FK → organizations (CASCADE) and → journeys.journeys (SET NULL, already dropped)
 -- =============================================================================
-DROP TABLE IF EXISTS public.org_events                CASCADE;
+DROP TABLE IF EXISTS public.org_events                CASCADE;  -- ghost table cleanup
 DROP TABLE IF EXISTS public.organization_members      CASCADE;
 DROP TABLE IF EXISTS public.organizations             CASCADE;
 DROP TABLE IF EXISTS public.platform_admin_whitelist  CASCADE;

@@ -14,6 +14,23 @@ class EventStatus(StrEnum):
     cancelled = "cancelled"
 
 
+class AttendanceModality(StrEnum):
+    presencial = "presencial"
+    online = "online"
+    hibrido = "hibrido"
+
+
+class AttendanceStatus(StrEnum):
+    registered = "registered"
+    attended = "attended"
+    no_show = "no_show"
+    cancelled = "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Event JSONB sub-models
+# ---------------------------------------------------------------------------
+
 class EventCounterpartDetails(BaseModel):
     address: Optional[str] = None
     full_entity_name: Optional[str] = None
@@ -44,6 +61,10 @@ class EventDiagnosis(BaseModel):
     main_obstacles: Optional[str] = None
 
 
+# ---------------------------------------------------------------------------
+# Event CRUD
+# ---------------------------------------------------------------------------
+
 class EventCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     slug: str = Field(..., pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -52,7 +73,6 @@ class EventCreate(BaseModel):
     end_date: Optional[datetime] = None
     location: Optional[str] = None
     status: EventStatus = EventStatus.upcoming
-    journey_ids: List[UUID4] = []
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
     counterpart_details: EventCounterpartDetails = Field(default_factory=EventCounterpartDetails)
@@ -67,7 +87,6 @@ class EventUpdate(BaseModel):
     end_date: Optional[datetime] = None
     location: Optional[str] = None
     status: Optional[EventStatus] = None
-    journey_ids: Optional[List[UUID4]] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
@@ -79,7 +98,6 @@ class EventUpdate(BaseModel):
 class EventResponse(BaseModel):
     id: str
     organization_id: str
-    journey_ids: List[str] = []
     name: str
     slug: str
     description: Optional[str] = None
@@ -93,5 +111,53 @@ class EventResponse(BaseModel):
     counterpart_details: EventCounterpartDetails = Field(default_factory=EventCounterpartDetails)
     venue_details: EventVenueDetails = Field(default_factory=EventVenueDetails)
     diagnosis: EventDiagnosis = Field(default_factory=EventDiagnosis)
+    # Computed via join — populated by EventManager
+    journey_ids: List[str] = []
+    attendance_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Event ↔ Journey assignment
+# ---------------------------------------------------------------------------
+
+class EventJourneyAdd(BaseModel):
+    journey_id: UUID4
+
+
+class EventJourneyResponse(BaseModel):
+    id: str
+    event_id: str
+    journey_id: str
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Attendance
+# ---------------------------------------------------------------------------
+
+class AttendanceCreate(BaseModel):
+    user_id: UUID4
+    modality: AttendanceModality = AttendanceModality.presencial
+    notes: Optional[str] = None
+
+
+class AttendanceUpdate(BaseModel):
+    status: Optional[AttendanceStatus] = None
+    modality: Optional[AttendanceModality] = None
+    notes: Optional[str] = None
+
+
+class AttendanceResponse(BaseModel):
+    id: str
+    event_id: str
+    user_id: str
+    modality: AttendanceModality
+    status: AttendanceStatus
+    registered_at: datetime
+    checked_in_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    # Populated via join with profiles
+    user_email: Optional[str] = None
+    user_full_name: Optional[str] = None

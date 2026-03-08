@@ -28,6 +28,25 @@ DECLARE
 BEGIN
 
 -- =============================================================================
+-- 0. Backfill profiles for existing auth.users
+--    factory_drop.sql wipes public.profiles but NOT auth.users.
+--    handle_new_user only fires on INSERT into auth.users, so existing accounts
+--    would be left without profiles after a reset. This recreates them.
+-- =============================================================================
+INSERT INTO public.profiles (id, email, full_name, avatar_url, metadata)
+SELECT
+    au.id,
+    au.email,
+    COALESCE(au.raw_user_meta_data->>'full_name', split_part(au.email, '@', 1)),
+    au.raw_user_meta_data->>'avatar_url',
+    COALESCE(au.raw_user_meta_data, '{}')
+FROM auth.users au
+WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = au.id)
+  AND au.email IS NOT NULL;
+
+RAISE NOTICE '✅ Profiles backfilled for existing auth.users';
+
+-- =============================================================================
 -- 1. Ensure base organizations exist
 --    These 2 orgs must always be present after every factory reset.
 -- =============================================================================
