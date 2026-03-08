@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends, Path
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from common.database.client import get_public_client, get_scoped_client
+from common.database.client import get_admin_client, get_public_client, get_scoped_client
 from common.exceptions import ForbiddenError, UnauthorizedError
 
 security_scheme = HTTPBearer()
@@ -34,13 +34,40 @@ async def get_current_user(token: str = Depends(get_current_token)):
 
 
 # ---------------------------------------------------------------------------
+# Platform admin helper (JWT + DB fallback)
+# ---------------------------------------------------------------------------
+async def is_platform_admin(user) -> bool:
+    """Checks is_platform_admin. JWT fast-path, then DB if JWT is stale.
+
+    JWT user_metadata is NOT updated when we promote an admin via SQL
+    (UPDATE profiles SET is_platform_admin = TRUE). The user would need to
+    logout/login for the JWT to reflect the change. To avoid that friction,
+    we fall back to querying public.profiles as the source of truth.
+    """
+    metadata = getattr(user, "user_metadata", None) or {}
+    if metadata.get("is_platform_admin", False):
+        return True  # JWT is clear — trust it
+
+    # JWT might be stale — verify from public.profiles
+    admin = await get_admin_client()
+    response = (
+        await admin.table("profiles")
+        .select("is_platform_admin")
+        .eq("id", str(user.id))
+        .maybe_single()
+        .execute()
+    )
+    if response.data:
+        return bool(response.data.get("is_platform_admin", False))
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Platform admin guard
 # ---------------------------------------------------------------------------
 class PlatformAdminRequired:
     async def __call__(self, user=Depends(get_current_user)):
-        metadata = getattr(user, "user_metadata", None) or {}
-        is_admin = metadata.get("is_platform_admin", False)
-        if not is_admin:
+        if not await is_platform_admin(user):
             raise ForbiddenError(
                 message="Acceso denegado: Se requieren permisos de Administrador."
             )
@@ -86,8 +113,7 @@ class OrgRoleRequired:
         memberships: list[dict] = Depends(get_user_memberships),
     ) -> OrgContext:
         # Platform admins tienen acceso total a cualquier organizacion
-        metadata = getattr(user, "user_metadata", None) or {}
-        if metadata.get("is_platform_admin", False):
+        if await is_platform_admin(user):
             return OrgContext(
                 organization_id=org_id,
                 role="owner",

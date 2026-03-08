@@ -2,12 +2,14 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from common.database.client import get_admin_client
 from common.auth.security import (
     AdminUser,
     CurrentUser,
     OrgContext,
     OrgRoleRequired,
     get_current_token,
+    is_platform_admin,
 )
 from services.auth_service.logic.org_manager import OrgManager
 from services.auth_service.schemas.auth import (
@@ -37,7 +39,7 @@ async def list_organizations(
     token: str = Depends(get_current_token),
 ):
     """Lista organizaciones. Platform admin ve TODAS, usuarios normales solo las suyas."""
-    if user.user_metadata.get("is_platform_admin", False):
+    if await is_platform_admin(user):
         return await OrgManager.list_all_orgs()
     return await OrgManager.list_my_orgs(token, str(user.id))
 
@@ -61,7 +63,15 @@ async def create_organization(
     payload = data.model_dump(exclude_unset=True, exclude={"owner_user_id"})
     owner_id = data.owner_user_id or str(user.id)
     try:
-        return await OrgManager.create_org(payload, owner_id)
+        org = await OrgManager.create_org(payload, owner_id)
+        # DB trigger skips audit for admin-client operations (auth.uid() = NULL).
+        # Write explicit log here where we know the actor.
+        await _log_org_event(
+            "ORG_CREATED", str(user.id), user.email,
+            org_id=org["id"], resource_id=org["id"],
+            metadata={"name": org["name"], "slug": org["slug"], "type": org.get("type")},
+        )
+        return org
     except Exception as exc:
         logger.exception("Error creating organization: %s", exc)
         raise HTTPException(
@@ -189,3 +199,33 @@ async def remove_member(
     """Elimina un miembro de la organizacion (requiere owner o admin)."""
     await OrgManager.remove_member(token, member_id)
     return None
+
+
+async def _log_org_event(
+    action: str,
+    actor_id: str,
+    actor_email: str,
+    org_id: str,
+    resource_id: str,
+    metadata: dict | None = None,
+) -> None:
+    """Explicit audit log for admin-client operations (DB trigger can't resolve actor there)."""
+    try:
+        admin = await get_admin_client()
+        await (
+            admin.schema("audit")
+            .table("logs")
+            .insert({
+                "actor_id": actor_id,
+                "actor_email": actor_email,
+                "category_code": "org",
+                "action": action,
+                "resource": "organizations",
+                "resource_id": resource_id,
+                "organization_id": org_id,
+                "metadata": metadata or {},
+            })
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("Audit log failed for %s (%s): %s", action, actor_email, exc)
