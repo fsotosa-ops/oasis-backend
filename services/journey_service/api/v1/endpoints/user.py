@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from supabase import AsyncClient
 
 from common.auth.security import CurrentUser, UserMemberships
 from common.database.client import get_admin_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -40,35 +44,41 @@ async def onboarding_check(
 
     org_id = active[0]["organization_id"]
 
-    # Fetch gamification config to get profile_completion_journey_id
-    config_resp = (
-        await db.schema("journeys")
-        .table("gamification_config")
-        .select("profile_completion_journey_id")
-        .eq("organization_id", org_id)
-        .maybe_single()
-        .execute()
-    )
-    config = config_resp.data
-    if not config or not config.get("profile_completion_journey_id"):
+    try:
+        # Fetch gamification config to get profile_completion_journey_id
+        config_resp = (
+            await db.schema("journeys")
+            .table("gamification_config")
+            .select("profile_completion_journey_id")
+            .eq("organization_id", org_id)
+            .maybe_single()
+            .execute()
+        )
+        config = config_resp.data
+        if not config or not config.get("profile_completion_journey_id"):
+            return OnboardingCheckResponse(should_show=False)
+
+        journey_id = str(config["profile_completion_journey_id"])
+
+        # Check if user has a completed enrollment for this journey
+        enrollment_resp = (
+            await db.schema("journeys")
+            .table("enrollments")
+            .select("status")
+            .eq("user_id", user_id)
+            .eq("journey_id", journey_id)
+            .maybe_single()
+            .execute()
+        )
+        enrollment = enrollment_resp.data
+
+        if enrollment and enrollment.get("status") == "completed":
+            return OnboardingCheckResponse(should_show=False)
+
+        # No enrollment or active enrollment → show onboarding
+        return OnboardingCheckResponse(should_show=True, journey_id=journey_id)
+    except Exception:
+        logger.exception(
+            "onboarding-check failed for user=%s org=%s", user_id, org_id,
+        )
         return OnboardingCheckResponse(should_show=False)
-
-    journey_id = str(config["profile_completion_journey_id"])
-
-    # Check if user has a completed enrollment for this journey
-    enrollment_resp = (
-        await db.schema("journeys")
-        .table("enrollments")
-        .select("status")
-        .eq("user_id", user_id)
-        .eq("journey_id", journey_id)
-        .maybe_single()
-        .execute()
-    )
-    enrollment = enrollment_resp.data
-
-    if enrollment and enrollment.get("status") == "completed":
-        return OnboardingCheckResponse(should_show=False)
-
-    # No enrollment or active enrollment → show onboarding
-    return OnboardingCheckResponse(should_show=True, journey_id=journey_id)
