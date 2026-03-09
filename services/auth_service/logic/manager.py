@@ -115,6 +115,52 @@ class AuthManager:
         )
         memberships = _flatten_memberships(response.data or [])
 
+        # Auto-assign platform admins to ALL organizations
+        profile_resp = (
+            await admin.table("profiles")
+            .select("is_platform_admin")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        is_admin = bool((profile_resp.data or {}).get("is_platform_admin", False))
+
+        if is_admin:
+            all_orgs_resp = (
+                await admin.table("organizations")
+                .select("id")
+                .execute()
+            )
+            all_org_ids = {o["id"] for o in (all_orgs_resp.data or [])}
+            member_org_ids = {m["organization_id"] for m in memberships}
+            missing_org_ids = all_org_ids - member_org_ids
+
+            if missing_org_ids:
+                rows = [
+                    {
+                        "organization_id": oid,
+                        "user_id": user_id,
+                        "role": "admin",
+                        "status": "active",
+                    }
+                    for oid in missing_org_ids
+                ]
+                await admin.table("organization_members").upsert(
+                    rows, on_conflict="organization_id,user_id"
+                ).execute()
+                # Re-fetch memberships
+                response = (
+                    await admin.table("organization_members")
+                    .select(
+                        "id, organization_id, role, status, joined_at, "
+                        "organizations(name, slug)"
+                    )
+                    .eq("user_id", user_id)
+                    .eq("status", "active")
+                    .execute()
+                )
+                memberships = _flatten_memberships(response.data or [])
+
         # Defensive: if DB trigger didn't fire, auto-assign to default community org
         if not memberships:
             try:
