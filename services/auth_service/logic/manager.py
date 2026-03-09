@@ -146,7 +146,7 @@ class AuthManager:
                         {
                             "organization_id": oid,
                             "user_id": user_id,
-                            "role": "admin",
+                            "role": "owner",
                             "status": "active",
                         }
                         for oid in missing_org_ids

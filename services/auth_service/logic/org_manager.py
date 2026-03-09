@@ -84,6 +84,36 @@ class OrgManager:
             .execute()
         )
 
+        # Auto-assign all other platform admins as "owner"
+        try:
+            admins_resp = (
+                await admin.table("profiles")
+                .select("id")
+                .eq("is_platform_admin", True)
+                .neq("id", owner_user_id)
+                .execute()
+            )
+            other_admins = admins_resp.data or []
+            if other_admins:
+                rows = [
+                    {
+                        "organization_id": org["id"],
+                        "user_id": a["id"],
+                        "role": "owner",
+                        "status": "active",
+                    }
+                    for a in other_admins
+                ]
+                await admin.table("organization_members").upsert(
+                    rows, on_conflict="organization_id,user_id"
+                ).execute()
+                logger.info(
+                    "Auto-assigned %d platform admins to new org %s",
+                    len(rows), org["id"],
+                )
+        except Exception as exc:
+            logger.warning("Auto-assign platform admins to new org failed: %s", exc)
+
         return org
 
     @staticmethod
