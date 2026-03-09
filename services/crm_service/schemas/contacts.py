@@ -43,18 +43,28 @@ class PaginatedContactsResponse(BaseModel):
 
 
 class ContactEventParticipation(BaseModel):
-    enrollment_id: str
-    enrollment_status: str
-    enrolled_at: Optional[datetime] = None
+    # Primary: attendance record (always present)
+    attendance_id: str
+    attendance_status: str
+    modality: Optional[str] = None
+    registered_at: Optional[datetime] = None
+    checked_in_at: Optional[datetime] = None
+    # Event
     event_id: str
     event_name: str
     event_slug: str
     event_status: str
     event_start_date: Optional[datetime] = None
     event_location: Optional[str] = None
+    # Org
     org_id: str
     org_name: str
     org_slug: str
+    # Optional: enrollment traceability (only if a journey was assigned)
+    enrollment_id: Optional[str] = None
+    enrollment_status: Optional[str] = None
+    journey_id: Optional[str] = None
+    enrolled_at: Optional[datetime] = None
 
 
 # ---------------------------------------------------------------------------
