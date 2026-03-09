@@ -87,7 +87,20 @@ DROP TYPE IF EXISTS public.membership_status CASCADE;
 DROP TYPE IF EXISTS public.account_status    CASCADE;
 
 -- =============================================================================
--- DONE — Database is clean.
+-- 6. Clear migration history so 'supabase db push' re-applies ALL migrations
+-- =============================================================================
+-- Without this, supabase db push sees all migrations as already applied and
+-- skips them — even though the tables were just dropped. The result is an
+-- empty database with no tables.
+--
+-- supabase_migrations is a Supabase system schema (not dropped above).
+-- Clearing its schema_migrations table is the only safe way to force a full
+-- re-apply after a factory drop.
+-- =============================================================================
+DELETE FROM supabase_migrations.schema_migrations;
+
+-- =============================================================================
+-- DONE — Database is clean and migration history is reset.
 -- Next step: run 'supabase db push' to re-apply all migrations.
 -- =============================================================================
-SELECT '✅ Factory drop complete. Run supabase db push to re-apply migrations.' AS status;
+SELECT '✅ Factory drop complete. Migration history cleared. Run supabase db push.' AS status;

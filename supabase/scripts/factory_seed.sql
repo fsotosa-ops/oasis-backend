@@ -17,6 +17,21 @@
 -- =============================================================================
 
 -- =============================================================================
+-- 1b. Fix service_role grants (lost when tables are dropped + recreated via migrations)
+-- =============================================================================
+-- Supabase auto-grants service_role on tables created via dashboard, but NOT
+-- via supabase db push. After factory reset the admin client gets 403.
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT USAGE ON SCHEMA public TO anon;
+GRANT ALL ON TABLE public.profiles TO service_role;
+GRANT ALL ON TABLE public.organizations TO service_role;
+GRANT ALL ON TABLE public.organization_members TO service_role;
+GRANT ALL ON TABLE public.platform_admin_whitelist TO service_role;
+GRANT SELECT ON TABLE public.profiles TO anon;
+GRANT SELECT ON TABLE public.organizations TO anon;
+GRANT SELECT ON TABLE public.organization_members TO anon;
+
+-- =============================================================================
 -- 2. Seed audit categories — single source of truth in audit_categories.sql
 -- =============================================================================
 \ir audit_categories.sql
