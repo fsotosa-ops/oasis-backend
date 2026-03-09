@@ -121,10 +121,9 @@ async def join_event(
                 .eq("user_id", user_id)
                 .eq("journey_id", first_journey_id)
                 .eq("status", "active")
-                .maybe_single()
                 .execute()
             )
-            if not existing.data:
+            if not existing.data or len(existing.data) == 0:
                 await admin.schema("journeys").table("enrollments").insert(
                     {
                         "user_id": user_id,
