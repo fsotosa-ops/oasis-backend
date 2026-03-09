@@ -89,7 +89,7 @@ class OrgManager:
             admins_resp = (
                 await admin.table("profiles")
                 .select("id")
-                .eq("is_platform_admin", True)
+                .is_("is_platform_admin", "true")
                 .neq("id", owner_user_id)
                 .execute()
             )
