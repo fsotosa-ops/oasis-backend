@@ -49,14 +49,20 @@ async def get_crm_stats(
     total_notes = notes_resp.count or 0
 
     # Contact breakdown by status
-    contacts_resp = (
-        await db.schema("crm")
-        .table("contacts")
-        .select("status")
-        .eq("organization_id", org_id)
-        .execute()
-    )
-    statuses = [c["status"] for c in (contacts_resp.data or [])]
+    # crm.contacts is a global table (keyed by user_id, no organization_id column).
+    # Filter by member_ids already fetched above.
+    member_ids = [m["user_id"] for m in (members_resp.data or [])]
+    if member_ids:
+        contacts_resp = (
+            await db.schema("crm")
+            .table("contacts")
+            .select("status")
+            .in_("user_id", member_ids)
+            .execute()
+        )
+        statuses = [c["status"] for c in (contacts_resp.data or [])]
+    else:
+        statuses = []
     active_contacts = sum(1 for s in statuses if s == "active")
     inactive_contacts = sum(1 for s in statuses if s == "inactive")
     risk_contacts = sum(1 for s in statuses if s == "risk")
