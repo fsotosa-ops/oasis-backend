@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 
 from common.auth.security import AdminUser
 from common.database.client import get_admin_client
+from common.exceptions import NotFoundError
 from services.journey_service.crud import enrollments as crud
 from services.journey_service.schemas.enrollments import EnrollmentDetailResponse, EnrollmentResponse
 from supabase import AsyncClient
@@ -61,3 +62,21 @@ async def get_user_enrollments_details_admin(
             details.append(detail)
 
     return details
+
+
+@router.delete(
+    "/{enrollment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="[Admin] Desenrolar usuario de un journey",
+)
+async def admin_unenroll(
+    enrollment_id: UUID,
+    _admin: AdminUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Remove an enrollment and its step completions. Platform admin only."""
+    enrollment = await crud.get_enrollment_by_id(db, enrollment_id)
+    if not enrollment:
+        raise NotFoundError("Enrollment")
+
+    await crud.delete_enrollment(db, enrollment_id)

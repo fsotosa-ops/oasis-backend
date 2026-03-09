@@ -257,6 +257,22 @@ async def update_enrollment_status(
     return response.data[0] if response.data else {}
 
 
+async def delete_enrollment(db: AsyncClient, enrollment_id: UUID) -> None:
+    """Delete step completions and then the enrollment itself."""
+    await (
+        db.schema("journeys").table("step_completions")
+        .delete()
+        .eq("enrollment_id", str(enrollment_id))
+        .execute()
+    )
+    await (
+        db.schema("journeys").table("enrollments")
+        .delete()
+        .eq("id", str(enrollment_id))
+        .execute()
+    )
+
+
 async def get_step_by_id(db: AsyncClient, step_id: UUID) -> dict | None:
     response = (
         await db.schema("journeys").table("steps")
