@@ -139,7 +139,7 @@ class OrgManager:
             .select(
                 "id, organization_id, user_id, role, status, "
                 "invited_by, invited_at, joined_at, "
-                "profiles!fk_org_members_user_profile(id, email, full_name, is_platform_admin)"
+                "profiles!user_id(id, email, full_name, is_platform_admin)"
             )
             .eq("organization_id", org_id)
             .execute()

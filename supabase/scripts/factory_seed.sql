@@ -86,6 +86,26 @@ WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = au.id)
 RAISE NOTICE '✅ Profiles backfilled for existing auth.users';
 
 -- =============================================================================
+-- 0b. Backfill crm.contacts for existing auth.users
+--     The trigger trg_auto_create_crm_contact only fires on INSERT into
+--     auth.users. Users created before the trigger migration have no row
+--     in crm.contacts.
+-- =============================================================================
+INSERT INTO crm.contacts (user_id, email, first_name, last_name, avatar_url)
+SELECT
+    au.id,
+    au.email,
+    au.raw_user_meta_data ->> 'first_name',
+    au.raw_user_meta_data ->> 'last_name',
+    au.raw_user_meta_data ->> 'avatar_url'
+FROM auth.users au
+WHERE NOT EXISTS (SELECT 1 FROM crm.contacts c WHERE c.user_id = au.id)
+  AND au.email IS NOT NULL
+ON CONFLICT (user_id) DO NOTHING;
+
+RAISE NOTICE '✅ crm.contacts backfilled for existing auth.users';
+
+-- =============================================================================
 -- 3. Ensure base organizations exist
 --    These 2 orgs must always be present after every factory reset.
 -- =============================================================================
