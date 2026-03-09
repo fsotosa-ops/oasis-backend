@@ -1,3 +1,5 @@
+import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -16,6 +18,8 @@ from services.journey_service.schemas.enrollments import (
     UpdateEnrollmentEventRequest,
 )
 from supabase import AsyncClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -40,6 +44,35 @@ async def enroll_user(
     new_enrollment = await crud.create_enrollment(
         db, user_id, payload.journey_id, event_id=payload.event_id
     )
+
+    # Auto-join the event's organization if enrolling via an event
+    if payload.event_id:
+        try:
+            event = await db.schema("crm").table("org_events") \
+                .select("organization_id") \
+                .eq("id", str(payload.event_id)) \
+                .maybe_single().execute()
+
+            if event.data and event.data.get("organization_id"):
+                event_org_id = event.data["organization_id"]
+                await db.table("organization_members").upsert(
+                    {
+                        "organization_id": event_org_id,
+                        "user_id": str(user_id),
+                        "role": "participante",
+                        "status": "active",
+                        "joined_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    on_conflict="organization_id,user_id",
+                ).execute()
+                logger.info(
+                    "Auto-joined user %s to event org %s", user_id, event_org_id
+                )
+        except Exception:
+            logger.warning(
+                "Failed to auto-join user %s to event %s org — continuing",
+                user_id, payload.event_id,
+            )
 
     return EnrollmentResponse(
         id=new_enrollment["id"],

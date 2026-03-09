@@ -51,7 +51,8 @@ coverage.xml
 pytestdebug.log
 
 # Environments
-.env*
+*.env*
+.env.example
 .venv
 env/
 venv/
@@ -80,3 +81,5 @@ openapi_oasis.json
 response_rewards.json
 *.csv
 *.docx
+
+supabase/config.toml

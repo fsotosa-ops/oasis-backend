@@ -173,13 +173,19 @@ async def update_journey(
             {"metadata": current_metadata}
         ).eq("id", str(journey_id)).execute()
 
-        # Clear profile_completion_journey_id
-        org_uuid = UUID(org_id)
-        await gamif_config_crud.update_config(
-            db,
-            org_uuid,
-            GamificationConfigUpdate(profile_completion_journey_id=None),
-        )
+        # Clear profile_completion_journey_id (defensive — config may not exist)
+        try:
+            org_uuid = UUID(org_id)
+            await gamif_config_crud.update_config(
+                db,
+                org_uuid,
+                GamificationConfigUpdate(profile_completion_journey_id=None),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to clear gamification config for org %s — may not exist yet",
+                org_id,
+            )
 
     journey = await crud.get_journey_admin(db, journey_id)
     return journey

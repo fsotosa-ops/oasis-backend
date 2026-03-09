@@ -5,22 +5,24 @@
 -- All operations are idempotent (ON CONFLICT / guarded by EXISTS).
 --
 -- Steps:
---   1. Ensure the 2 base organizations exist
---   2. Seed all audit categories (via \ir)
---   3. Seed admin whitelist
---   4. Ensure gamification_config rows for base orgs
---   5. Promote platform admins + assign ownership of both orgs
---   6. Verification summary
+--   1. Fix service_role grants (lost when tables are dropped + recreated)
+--   2. Seed all audit categories (inline — no \ir dependency)
+--   3. Ensure base organizations exist
+--   4. Seed admin whitelist
+--   5. Ensure gamification_config rows for base orgs
+--   6. Promote platform admins + assign ownership of both orgs
+--   7. Verification summary
 --
--- NOTE: \ir is a psql meta-command (used in factory_reset.sh).
---       If running in Supabase SQL Editor, run audit_categories.sql manually first.
+-- This file is self-contained: works in both psql and Supabase SQL Editor.
 -- =============================================================================
 
 -- =============================================================================
--- 1b. Fix service_role grants (lost when tables are dropped + recreated via migrations)
+-- 1. Fix service_role grants (public + journeys + crm schemas)
 -- =============================================================================
 -- Supabase auto-grants service_role on tables created via dashboard, but NOT
 -- via supabase db push. After factory reset the admin client gets 403.
+
+-- public schema
 GRANT USAGE ON SCHEMA public TO service_role;
 GRANT USAGE ON SCHEMA public TO anon;
 GRANT ALL ON TABLE public.profiles TO service_role;
@@ -31,10 +33,32 @@ GRANT SELECT ON TABLE public.profiles TO anon;
 GRANT SELECT ON TABLE public.organizations TO anon;
 GRANT SELECT ON TABLE public.organization_members TO anon;
 
+-- journeys schema
+GRANT USAGE ON SCHEMA journeys TO service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA journeys TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA journeys GRANT ALL ON TABLES TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA journeys GRANT ALL ON SEQUENCES TO service_role;
+
+-- crm schema
+GRANT USAGE ON SCHEMA crm TO service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA crm TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT ALL ON TABLES TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT ALL ON SEQUENCES TO service_role;
+
 -- =============================================================================
--- 2. Seed audit categories — single source of truth in audit_categories.sql
+-- 2. Seed audit categories (inline — no \ir dependency)
 -- =============================================================================
-\ir audit_categories.sql
+INSERT INTO audit.categories (code, label, description) VALUES
+    ('auth',          'Seguridad',      'Logins, registro, logout'),
+    ('org',           'Organización',   'Cambios en empresa, miembros e invitaciones'),
+    ('billing',       'Facturación',    'Pagos y suscripciones'),
+    ('journey',       'Experiencia',    'Avance de usuarios en journeys'),
+    ('system',        'Sistema',        'Errores y tareas automáticas'),
+    ('crm',           'CRM',            'Cambios en contactos, notas y tareas del CRM'),
+    ('event',         'Evento',         'Creación, modificación y eliminación de eventos'),
+    ('resource',      'Recurso',        'Acceso y gestión de recursos educativos'),
+    ('gamification',  'Gamificación',   'Recompensas, insignias y puntos de experiencia')
+ON CONFLICT (code) DO NOTHING;
 
 DO $$
 DECLARE
@@ -62,7 +86,7 @@ WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = au.id)
 RAISE NOTICE '✅ Profiles backfilled for existing auth.users';
 
 -- =============================================================================
--- 1. Ensure base organizations exist
+-- 3. Ensure base organizations exist
 --    These 2 orgs must always be present after every factory reset.
 -- =============================================================================
 
@@ -101,7 +125,7 @@ END IF;
 RAISE NOTICE '✅ Base orgs ready: oasis-community=%, fundacion-summer=%', v_community_org_id, v_summer_org_id;
 
 -- =============================================================================
--- 3. Seed admin whitelist
+-- 4. Seed admin whitelist
 --    Mirrors the whitelist seeded by migration 20260308000006.
 --    Idempotent — safe to re-run after a factory reset.
 -- =============================================================================
@@ -113,7 +137,7 @@ ON CONFLICT (email) DO NOTHING;
 RAISE NOTICE '✅ Admin whitelist seeded';
 
 -- =============================================================================
--- 4. Ensure gamification_config rows for base orgs
+-- 5. Ensure gamification_config rows for base orgs
 --    The auto-trigger (20260308000002) handles future orgs. Base orgs need
 --    manual seeding because they're created before the trigger exists.
 -- =============================================================================
@@ -128,7 +152,22 @@ ON CONFLICT (organization_id) DO NOTHING;
 RAISE NOTICE '✅ gamification_config ensured for both base orgs';
 
 -- =============================================================================
--- 5. Promote platform admins + assign ownership of BOTH base orgs
+-- 5b. Ensure crm.organization_profiles rows for base orgs
+--     The auto-trigger (20260308000011) handles future orgs. Base orgs need
+--     manual seeding because they may be created before the trigger exists.
+-- =============================================================================
+INSERT INTO crm.organization_profiles (org_id)
+VALUES (v_community_org_id)
+ON CONFLICT (org_id) DO NOTHING;
+
+INSERT INTO crm.organization_profiles (org_id)
+VALUES (v_summer_org_id)
+ON CONFLICT (org_id) DO NOTHING;
+
+RAISE NOTICE '✅ crm.organization_profiles ensured for both base orgs';
+
+-- =============================================================================
+-- 6. Promote platform admins + assign ownership of BOTH base orgs
 --    For existing accounts: promote and add memberships.
 --    For new accounts: the whitelist trigger handles promotion on first login.
 --    The org memberships below cover the case where admins already have accounts.
@@ -156,7 +195,7 @@ RAISE NOTICE '✅ Platform admins promoted + assigned as owners of both base org
 END $$;
 
 -- =============================================================================
--- 6. Verification summary
+-- 7. Verification summary
 -- =============================================================================
 SELECT table_name, rows FROM (
     SELECT 'public.profiles'                    AS table_name, COUNT(*) AS rows FROM public.profiles
@@ -174,6 +213,8 @@ SELECT table_name, rows FROM (
     SELECT 'journeys.gamification_config',       COUNT(*) FROM journeys.gamification_config
     UNION ALL
     SELECT 'crm.contacts',                       COUNT(*) FROM crm.contacts
+    UNION ALL
+    SELECT 'crm.organization_profiles',          COUNT(*) FROM crm.organization_profiles
 ) counts
 ORDER BY table_name;
 
