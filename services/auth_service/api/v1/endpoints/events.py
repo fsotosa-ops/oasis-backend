@@ -46,7 +46,13 @@ async def join_event(
     current_user: CurrentUser,
 ):
     """Unified join flow: org membership + attendance + enrollment (if journey assigned)."""
-    admin = await get_admin_client()
+    # Fresh client to avoid singleton .schema() state corruption
+    import os
+    from supabase import acreate_client
+    admin = await acreate_client(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
+    )
     user_id = str(current_user.id)
     now = datetime.now(timezone.utc).isoformat()
 
