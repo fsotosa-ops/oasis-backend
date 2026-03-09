@@ -3,9 +3,13 @@
 Org-scoped routes:   /auth/organizations/{org_id}/events/...
 Gateway route:       /auth/events/{event_id}
 """
+import logging
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, status
 
 from common.auth.security import CurrentUser, OrgContext, OrgRoleRequired, get_current_token
+from common.database.client import get_admin_client
 from services.auth_service.logic.event_manager import EventManager
 from services.auth_service.schemas.events import (
     AttendanceCreate,
@@ -16,7 +20,10 @@ from services.auth_service.schemas.events import (
     EventJourneyResponse,
     EventResponse,
     EventUpdate,
+    JoinEventResponse,
 )
+
+logger = logging.getLogger("oasis.events")
 
 router = APIRouter()
 
@@ -31,6 +38,109 @@ async def get_event_by_id(
 ):
     """Obtiene info de un evento por ID (usado por QR gateway, no requiere org)."""
     return await EventManager.get_event_by_id(event_id)
+
+
+@event_gateway_router.post("/{event_id}/join", response_model=JoinEventResponse)
+async def join_event(
+    event_id: str,
+    current_user: CurrentUser,
+):
+    """Unified join flow: org membership + attendance + enrollment (if journey assigned)."""
+    admin = await get_admin_client()
+    user_id = str(current_user.id)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. Fetch event + its event_journeys
+    event_resp = (
+        await admin.schema("crm").table("org_events")
+        .select("*, event_journeys(journey_id)")
+        .eq("id", event_id)
+        .single()
+        .execute()
+    )
+    if not event_resp.data:
+        from common.exceptions import NotFoundError
+        raise NotFoundError("Evento")
+
+    event = event_resp.data
+    org_id = event["organization_id"]
+    journey_ids = [ej["journey_id"] for ej in (event.get("event_journeys") or [])]
+
+    org_joined = False
+    attendance_registered = False
+    journey_enrolled: str | None = None
+
+    # 2. Upsert organization_members (auto-join org as participante)
+    try:
+        await admin.table("organization_members").upsert(
+            {
+                "organization_id": org_id,
+                "user_id": user_id,
+                "role": "participante",
+                "status": "active",
+                "joined_at": now,
+            },
+            on_conflict="organization_id,user_id",
+        ).execute()
+        org_joined = True
+        logger.info("join_event: user %s joined org %s", user_id, org_id)
+    except Exception:
+        logger.warning("join_event: failed to upsert org membership for user %s", user_id)
+
+    # 3. Upsert crm.event_attendances (status=registered, modality=presencial)
+    try:
+        await admin.schema("crm").table("event_attendances").upsert(
+            {
+                "event_id": event_id,
+                "user_id": user_id,
+                "status": "registered",
+                "modality": "presencial",
+                "registered_at": now,
+            },
+            on_conflict="event_id,user_id",
+        ).execute()
+        attendance_registered = True
+        logger.info("join_event: attendance registered for user %s event %s", user_id, event_id)
+    except Exception:
+        logger.warning("join_event: failed to upsert attendance for user %s event %s", user_id, event_id)
+
+    # 4. If event has journeys → enroll in first journey (skip if already enrolled)
+    if journey_ids:
+        first_journey_id = journey_ids[0]
+        try:
+            existing = (
+                await admin.schema("journeys").table("enrollments")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("journey_id", first_journey_id)
+                .eq("status", "active")
+                .maybe_single()
+                .execute()
+            )
+            if not existing.data:
+                await admin.schema("journeys").table("enrollments").insert(
+                    {
+                        "user_id": user_id,
+                        "journey_id": first_journey_id,
+                        "event_id": event_id,
+                        "status": "active",
+                        "current_step_index": 0,
+                        "started_at": now,
+                    }
+                ).execute()
+                journey_enrolled = first_journey_id
+                logger.info("join_event: enrolled user %s in journey %s", user_id, first_journey_id)
+            else:
+                logger.info("join_event: user %s already enrolled in journey %s", user_id, first_journey_id)
+        except Exception:
+            logger.warning("join_event: failed to enroll user %s in journey %s", user_id, first_journey_id)
+
+    return JoinEventResponse(
+        event_id=event_id,
+        org_joined=org_joined,
+        attendance_registered=attendance_registered,
+        journey_enrolled=journey_enrolled,
+    )
 
 
 # ---------------------------------------------------------------------------

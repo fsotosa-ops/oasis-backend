@@ -74,6 +74,28 @@ async def enroll_user(
                 user_id, payload.event_id,
             )
 
+        # Auto-register attendance for the event
+        try:
+            await db.schema("crm").table("event_attendances").upsert(
+                {
+                    "event_id": str(payload.event_id),
+                    "user_id": str(user_id),
+                    "status": "registered",
+                    "modality": "presencial",
+                    "registered_at": datetime.now(timezone.utc).isoformat(),
+                },
+                on_conflict="event_id,user_id",
+            ).execute()
+            logger.info(
+                "Auto-registered attendance for user %s at event %s",
+                user_id, payload.event_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to auto-register attendance for user %s at event %s — continuing",
+                user_id, payload.event_id,
+            )
+
     return EnrollmentResponse(
         id=new_enrollment["id"],
         user_id=new_enrollment["user_id"],

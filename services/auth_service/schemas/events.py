@@ -137,6 +137,13 @@ class EventJourneyResponse(BaseModel):
 # Attendance
 # ---------------------------------------------------------------------------
 
+class JoinEventResponse(BaseModel):
+    event_id: str
+    org_joined: bool
+    attendance_registered: bool
+    journey_enrolled: str | None = None
+
+
 class AttendanceCreate(BaseModel):
     user_id: UUID4
     modality: AttendanceModality = AttendanceModality.presencial
