@@ -205,15 +205,22 @@ class EventManager:
 
     @staticmethod
     async def get_event_journey_ids(event_id: str) -> list[str]:
-        """Devuelve los journey_ids vinculados a un evento (admin client, sin RLS)."""
-        admin = await get_admin_client()
+        """Devuelve los journey_ids vinculados a un evento (fresh client, sin RLS)."""
+        from supabase import acreate_client
+        import os
+        client = await acreate_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
+        )
         resp = (
-            await admin.schema("crm").table("event_journeys")
+            await client.schema("crm").table("event_journeys")
             .select("journey_id")
             .eq("event_id", event_id)
             .execute()
         )
-        return [ej["journey_id"] for ej in (resp.data or [])]
+        result = [ej["journey_id"] for ej in (resp.data or [])]
+        print(f"[get_event_journey_ids] event={event_id} result={result} raw={resp.data}")
+        return result
 
     # ------------------------------------------------------------------
     # Helpers

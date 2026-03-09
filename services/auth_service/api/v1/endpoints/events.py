@@ -65,10 +65,7 @@ async def join_event(
     event = event_resp.data
     org_id = event["organization_id"]
     journey_ids = await EventManager.get_event_journey_ids(event_id)
-    logger.info(
-        "join_event: event=%s org=%s journey_ids=%s",
-        event_id, org_id, journey_ids,
-    )
+    print(f"[join_event] event={event_id} org={org_id} journey_ids={journey_ids}")
 
     org_joined = False
     attendance_registered = False
@@ -140,10 +137,7 @@ async def join_event(
         except Exception as exc:
             logger.exception("join_event: failed to enroll user %s in journey %s: %s", user_id, first_journey_id, exc)
 
-    logger.info(
-        "join_event: RESPONSE event_id=%s journey_enrolled=%s org_joined=%s attendance=%s",
-        event_id, journey_enrolled, org_joined, attendance_registered,
-    )
+    print(f"[join_event] RESPONSE journey_enrolled={journey_enrolled}")
     return JoinEventResponse(
         event_id=event_id,
         organization_id=org_id,
