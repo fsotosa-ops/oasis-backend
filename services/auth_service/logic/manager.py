@@ -116,50 +116,60 @@ class AuthManager:
         memberships = _flatten_memberships(response.data or [])
 
         # Auto-assign platform admins to ALL organizations
-        profile_resp = (
-            await admin.table("profiles")
-            .select("is_platform_admin")
-            .eq("id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        is_admin = bool((profile_resp.data or {}).get("is_platform_admin", False))
-
-        if is_admin:
-            all_orgs_resp = (
-                await admin.table("organizations")
-                .select("id")
+        try:
+            profile_resp = (
+                await admin.table("profiles")
+                .select("is_platform_admin")
+                .eq("id", user_id)
+                .maybe_single()
                 .execute()
             )
-            all_org_ids = {o["id"] for o in (all_orgs_resp.data or [])}
-            member_org_ids = {m["organization_id"] for m in memberships}
-            missing_org_ids = all_org_ids - member_org_ids
+            is_admin = bool((profile_resp.data or {}).get("is_platform_admin", False))
+            logger.info("SuperAdmin auto-assign check: user=%s, is_admin=%s", user_id, is_admin)
 
-            if missing_org_ids:
-                rows = [
-                    {
-                        "organization_id": oid,
-                        "user_id": user_id,
-                        "role": "admin",
-                        "status": "active",
-                    }
-                    for oid in missing_org_ids
-                ]
-                await admin.table("organization_members").upsert(
-                    rows, on_conflict="organization_id,user_id"
-                ).execute()
-                # Re-fetch memberships
-                response = (
-                    await admin.table("organization_members")
-                    .select(
-                        "id, organization_id, role, status, joined_at, "
-                        "organizations(name, slug)"
-                    )
-                    .eq("user_id", user_id)
-                    .eq("status", "active")
+            if is_admin:
+                all_orgs_resp = (
+                    await admin.table("organizations")
+                    .select("id")
                     .execute()
                 )
-                memberships = _flatten_memberships(response.data or [])
+                all_org_ids = {o["id"] for o in (all_orgs_resp.data or [])}
+                member_org_ids = {m["organization_id"] for m in memberships}
+                missing_org_ids = all_org_ids - member_org_ids
+                logger.info(
+                    "SuperAdmin auto-assign: all_orgs=%d, member_orgs=%d, missing=%d",
+                    len(all_org_ids), len(member_org_ids), len(missing_org_ids),
+                )
+
+                if missing_org_ids:
+                    rows = [
+                        {
+                            "organization_id": oid,
+                            "user_id": user_id,
+                            "role": "admin",
+                            "status": "active",
+                        }
+                        for oid in missing_org_ids
+                    ]
+                    await admin.table("organization_members").upsert(
+                        rows, on_conflict="organization_id,user_id"
+                    ).execute()
+                    logger.info("SuperAdmin auto-assign: upserted %d memberships", len(rows))
+                    # Re-fetch memberships
+                    response = (
+                        await admin.table("organization_members")
+                        .select(
+                            "id, organization_id, role, status, joined_at, "
+                            "organizations(name, slug)"
+                        )
+                        .eq("user_id", user_id)
+                        .eq("status", "active")
+                        .execute()
+                    )
+                    memberships = _flatten_memberships(response.data or [])
+                    logger.info("SuperAdmin auto-assign: final memberships=%d", len(memberships))
+        except Exception as exc:
+            logger.error("SuperAdmin auto-assign failed for user %s: %s", user_id, exc, exc_info=True)
 
         # Defensive: if DB trigger didn't fire, auto-assign to default community org
         if not memberships:
