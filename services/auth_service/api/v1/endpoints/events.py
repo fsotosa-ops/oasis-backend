@@ -128,10 +128,11 @@ async def join_event(
                         "started_at": now,
                     }
                 ).execute()
-                journey_enrolled = first_journey_id
                 logger.info("join_event: enrolled user %s in journey %s", user_id, first_journey_id)
             else:
                 logger.info("join_event: user %s already enrolled in journey %s", user_id, first_journey_id)
+            # Always return the journey ID so the frontend can redirect
+            journey_enrolled = first_journey_id
         except Exception:
             logger.warning("join_event: failed to enroll user %s in journey %s", user_id, first_journey_id)
 
