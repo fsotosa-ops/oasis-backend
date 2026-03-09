@@ -1,10 +1,14 @@
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from supabase_auth.errors import AuthApiError
 from postgrest.exceptions import APIError as PostgRESTAPIError
 
+from common.cache.redis_client import cache_ping
 from common.exceptions import (
     OasisException,
     auth_api_error_handler,
@@ -22,18 +26,26 @@ from services.crm_service.api.v1.api import api_router as crm_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("oasis.gateway")
 
+from common.rate_limit import limiter
+
 app = FastAPI(
     title="OASIS Platform API",
     version="1.0.0",
     description="Gateway principal de la plataforma OASIS Multi-Tenant",
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ---------------------------------------------------------------------------
-# CORS middleware (global, unico lugar)
+# CORS middleware — restricted to known origins
 # ---------------------------------------------------------------------------
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,8 +85,13 @@ app.include_router(crm_router, prefix="/api/v1/crm", tags=["CRM"])
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Health check (includes Redis connectivity)
 # ---------------------------------------------------------------------------
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "oasis-gateway"}
+    redis_ok = cache_ping()
+    return {
+        "status": "ok",
+        "service": "oasis-gateway",
+        "redis": "connected" if redis_ok else "unavailable",
+    }

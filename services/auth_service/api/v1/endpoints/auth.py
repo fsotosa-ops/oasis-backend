@@ -1,10 +1,11 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from common.auth.security import get_current_token, get_current_user
 from common.database.client import get_admin_client
+from common.rate_limit import limiter
 from services.auth_service.logic.manager import AuthManager
 from services.auth_service.schemas.auth import (
     OAuthUrlResponse,
@@ -23,7 +24,8 @@ router = APIRouter()
 
 
 @router.post("/register", status_code=201)
-async def register(user: UserRegister):
+@limiter.limit("30/minute")
+async def register(request: Request, user: UserRegister):
     session = await AuthManager.register(user)
     if not session:
         return {"message": "Registro exitoso. Revisa tu email para confirmar."}
@@ -33,7 +35,8 @@ async def register(user: UserRegister):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(creds: UserLogin):
+@limiter.limit("30/minute")
+async def login(request: Request, creds: UserLogin):
     session = await AuthManager.login(creds.email, creds.password)
     response = await _build_response(session)
     await _log_auth_event("LOGIN", str(session.user.id), session.user.email, {"provider": "email"})

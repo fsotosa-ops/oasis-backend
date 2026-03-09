@@ -1,7 +1,14 @@
+import logging
+
 from uuid import UUID
 
+from common.cache.redis_client import cache_delete, cache_get_json, cache_set_json
 from services.journey_service.schemas.journeys import JourneyCreate, JourneyUpdate
 from supabase import AsyncClient
+
+logger = logging.getLogger("oasis.journey.crud")
+
+_JOURNEY_CACHE_TTL = 900  # 15 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -14,6 +21,16 @@ async def get_journeys_for_org(
     skip: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict], int]:
+    # Only cache the default query (active, first page)
+    use_cache = is_active is True and skip == 0 and limit == 50
+    cache_key = f"org_journeys:{org_id}"
+
+    if use_cache:
+        cached = cache_get_json(cache_key)
+        if cached is not None:
+            logger.debug("CACHE_HIT org_journeys:%s", org_id)
+            return cached.get("data", []), cached.get("count", 0)
+
     # Get journey IDs assigned to this org via junction table
     jo_response = (
         await db.schema("journeys")
@@ -42,7 +59,13 @@ async def get_journeys_for_org(
         .execute()
     )
 
-    return response.data or [], response.count or 0
+    data = response.data or []
+    count = response.count or 0
+
+    if use_cache:
+        cache_set_json(cache_key, {"data": data, "count": count}, _JOURNEY_CACHE_TTL)
+
+    return data, count
 
 
 async def get_journey_by_id(db: AsyncClient, journey_id: UUID) -> dict | None:
@@ -57,6 +80,12 @@ async def get_journey_by_id(db: AsyncClient, journey_id: UUID) -> dict | None:
 
 
 async def get_journey_with_steps(db: AsyncClient, journey_id: UUID) -> dict | None:
+    cache_key = f"journey:{journey_id}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        logger.debug("CACHE_HIT journey:%s", journey_id)
+        return cached
+
     journey_response = (
         await db.schema("journeys").table("journeys")
         .select("*")
@@ -79,6 +108,8 @@ async def get_journey_with_steps(db: AsyncClient, journey_id: UUID) -> dict | No
     )
 
     journey["steps"] = steps_response.data or []
+
+    cache_set_json(cache_key, journey, _JOURNEY_CACHE_TTL)
     return journey
 
 
@@ -155,6 +186,7 @@ async def create_journey(
                 "organization_id": org_id,
             }
         ).execute()
+        cache_delete(f"org_journeys:{org_id}")
 
     return created
 
@@ -183,14 +215,38 @@ async def update_journey(
         .eq("id", str(journey_id))
         .execute()
     )
-    return response.data[0] if response.data else {}
+    result = response.data[0] if response.data else {}
+
+    # Invalidate caches
+    cache_delete(f"journey:{journey_id}")
+    if result.get("organization_id"):
+        cache_delete(f"org_journeys:{result['organization_id']}")
+
+    return result
 
 
 async def delete_journey(db: AsyncClient, journey_id: UUID) -> bool:
+    # Fetch org_id before deleting for cache invalidation
+    pre = (
+        await db.schema("journeys").table("journeys")
+        .select("organization_id")
+        .eq("id", str(journey_id))
+        .maybe_single()
+        .execute()
+    )
+    org_id = pre.data.get("organization_id") if pre.data else None
+
     response = (
         await db.schema("journeys").table("journeys").delete().eq("id", str(journey_id)).execute()
     )
-    return len(response.data) > 0 if response.data else False
+    deleted = len(response.data) > 0 if response.data else False
+
+    if deleted:
+        cache_delete(f"journey:{journey_id}")
+        if org_id:
+            cache_delete(f"org_journeys:{org_id}")
+
+    return deleted
 
 
 async def get_journey_admin(db: AsyncClient, journey_id: UUID) -> dict | None:

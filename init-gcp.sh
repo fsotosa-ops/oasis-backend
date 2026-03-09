@@ -81,13 +81,14 @@ fi
 # 5. CREAR SECRETOS EN SECRET MANAGER
 echo -e "\n${YELLOW}[5/6] Creando secretos en Secret Manager...${NC}"
 
-ENV_FILE=".env"
+ENV_FILE="${1:-.env.production}"
 if [ ! -f "$ENV_FILE" ]; then
-    echo -e "${RED}❌ No se encontró archivo .env. Crea uno con las variables de Supabase.${NC}"
+    echo -e "${RED}❌ No se encontró archivo $ENV_FILE. Uso: ./init-gcp.sh [ruta-al-env]${NC}"
     exit 1
 fi
+echo "Leyendo secrets desde: $ENV_FILE"
 
-SECRETS=("SUPABASE_URL" "SUPABASE_ANON_KEY" "SUPABASE_SERVICE_ROLE_KEY" "SUPABASE_JWKS_URL" "SUPERSET_URL" "SUPERSET_ADMIN_USERNAME" "SUPERSET_ADMIN_PASSWORD" "SUPERSET_DASHBOARD_ID")
+SECRETS=("SUPABASE_URL" "SUPABASE_ANON_KEY" "SUPABASE_SERVICE_ROLE_KEY" "SUPABASE_JWKS_URL" "SUPERSET_URL" "SUPERSET_ADMIN_USERNAME" "SUPERSET_ADMIN_PASSWORD" "SUPERSET_DASHBOARD_ID" "UPSTASH_REDIS_REST_URL" "UPSTASH_REDIS_REST_TOKEN" "ALLOWED_ORIGINS")
 
 for SECRET_NAME in "${SECRETS[@]}"; do
     SECRET_VALUE=$(grep "^${SECRET_NAME}=" "$ENV_FILE" | cut -d'=' -f2-)

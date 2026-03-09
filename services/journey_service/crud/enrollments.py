@@ -1,7 +1,12 @@
+import logging
+
 from datetime import UTC, datetime
 from uuid import UUID
 
+from common.cache.redis_client import cache_get_json, cache_set_json
 from supabase import AsyncClient
+
+logger = logging.getLogger("oasis.enrollment.crud")
 
 
 async def get_active_enrollment(
@@ -422,3 +427,103 @@ async def verify_step_in_enrollment_journey(
         .execute()
     )
     return len(response.data) > 0 if response.data else False
+
+
+async def get_user_enrollments_full(
+    db: AsyncClient, user_id: UUID
+) -> list[dict]:
+    """Batch endpoint: returns enrollments + full journey data + step progress
+    in a single response. Replaces N+1 fetching pattern on the dashboard.
+
+    For each enrollment:
+    - journey: full journey object with steps (from cache if available)
+    - steps_progress: per-step completion status
+    """
+    # 1. Get all active/completed enrollments
+    enrollments = await get_user_enrollments(db, user_id)
+    if not enrollments:
+        return []
+
+    # 2. Collect unique journey IDs
+    journey_ids = list({e["journey_id"] for e in enrollments})
+
+    # 3. Batch-fetch journeys with steps (leverages Redis cache in get_journey_with_steps)
+    from services.journey_service.crud.journeys import get_journey_with_steps
+
+    journey_map: dict[str, dict] = {}
+    for jid in journey_ids:
+        j = await get_journey_with_steps(db, UUID(jid))
+        if j:
+            journey_map[jid] = j
+
+    # 4. Batch-fetch all step_completions for these enrollments
+    enrollment_ids = [e["id"] for e in enrollments]
+    completions_resp = (
+        await db.schema("journeys").table("step_completions")
+        .select("enrollment_id, step_id, completed_at, points_earned")
+        .in_("enrollment_id", enrollment_ids)
+        .execute()
+    )
+
+    # Group completions by enrollment_id
+    completions_by_enrollment: dict[str, dict[str, dict]] = {}
+    for c in (completions_resp.data or []):
+        eid = c["enrollment_id"]
+        if eid not in completions_by_enrollment:
+            completions_by_enrollment[eid] = {}
+        completions_by_enrollment[eid][c["step_id"]] = c
+
+    # 5. Build enriched response
+    result = []
+    for e in enrollments:
+        journey = journey_map.get(e["journey_id"])
+        if not journey:
+            continue
+
+        steps = journey.get("steps", [])
+        completions = completions_by_enrollment.get(e["id"], {})
+        current_index = e.get("current_step_index", 0)
+
+        steps_progress = []
+        completed_count = 0
+        for idx, step in enumerate(steps):
+            completion = completions.get(step["id"])
+            if completion:
+                step_status = "completed"
+                completed_count += 1
+            elif idx <= current_index:
+                step_status = "available"
+            else:
+                step_status = "locked"
+
+            steps_progress.append({
+                "step_id": step["id"],
+                "title": step["title"],
+                "type": step["type"],
+                "order_index": step["order_index"],
+                "status": step_status,
+                "completed_at": completion["completed_at"] if completion else None,
+                "points_earned": completion["points_earned"] if completion else 0,
+            })
+
+        result.append({
+            **e,
+            "journey": {
+                "id": journey["id"],
+                "title": journey["title"],
+                "slug": journey.get("slug"),
+                "description": journey.get("description"),
+                "thumbnail_url": journey.get("thumbnail_url"),
+                "category": journey.get("category"),
+                "is_active": journey.get("is_active"),
+                "organization_id": journey.get("organization_id"),
+                "metadata": journey.get("metadata"),
+                "steps": steps,
+                "total_steps": len(steps),
+            },
+            "steps_progress": steps_progress,
+            "completed_steps": completed_count,
+            "total_steps": len(steps),
+        })
+
+    return result

@@ -2,9 +2,10 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from common.auth.security import CurrentUser, get_current_token
+from common.rate_limit import limiter
 from common.database.client import get_admin_client
 from common.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from services.journey_service.crud import enrollments as crud
@@ -30,7 +31,9 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Inscribirse en un journey",
 )
+@limiter.limit("10/minute")
 async def enroll_user(
+    request: Request,
     payload: EnrollmentCreate,
     current_user: CurrentUser,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
@@ -106,6 +109,21 @@ async def enroll_user(
         progress_percentage=0.0,
         started_at=new_enrollment["started_at"],
     )
+
+
+@router.get(
+    "/me/full",
+    summary="Dashboard batch: enrollments + journey + progress (eliminates N+1)",
+)
+async def get_my_enrollments_full(
+    current_user: CurrentUser,
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Returns all enrollments with embedded journey data and step progress
+    in a single response. Replaces the N+1 pattern of calling /enrollments/me
+    then /journeys/{id} + /progress for each enrollment."""
+    user_id = UUID(str(current_user.id))
+    return await crud.get_user_enrollments_full(db, user_id)
 
 
 @router.get(
@@ -189,7 +207,9 @@ async def get_enrollment_progress(
     response_model=StepCompleteResponse,
     summary="Completar step individual",
 )
+@limiter.limit("30/minute")
 async def complete_step(
+    request: Request,
     enrollment_id: UUID,
     step_id: UUID,
     current_user: CurrentUser,
