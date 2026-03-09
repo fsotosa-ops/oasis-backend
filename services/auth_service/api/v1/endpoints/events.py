@@ -50,7 +50,7 @@ async def join_event(
     user_id = str(current_user.id)
     now = datetime.now(timezone.utc).isoformat()
 
-    # 1a. Fetch event
+    # 1. Fetch event + its journey assignments
     event_resp = (
         await admin.schema("crm").table("org_events")
         .select("*")
@@ -64,15 +64,7 @@ async def join_event(
 
     event = event_resp.data
     org_id = event["organization_id"]
-
-    # 1b. Fetch event_journeys separately (avoids PostgREST embedded join issues)
-    ej_resp = (
-        await admin.schema("crm").table("event_journeys")
-        .select("journey_id")
-        .eq("event_id", event_id)
-        .execute()
-    )
-    journey_ids = [ej["journey_id"] for ej in (ej_resp.data or [])]
+    journey_ids = await EventManager.get_event_journey_ids(event_id)
     logger.info(
         "join_event: event=%s org=%s journey_ids=%s",
         event_id, org_id, journey_ids,

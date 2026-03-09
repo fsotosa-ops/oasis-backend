@@ -203,6 +203,18 @@ class EventManager:
             .execute()
         )
 
+    @staticmethod
+    async def get_event_journey_ids(event_id: str) -> list[str]:
+        """Devuelve los journey_ids vinculados a un evento (admin client, sin RLS)."""
+        admin = await get_admin_client()
+        resp = (
+            await admin.schema("crm").table("event_journeys")
+            .select("journey_id")
+            .eq("event_id", event_id)
+            .execute()
+        )
+        return [ej["journey_id"] for ej in (resp.data or [])]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
