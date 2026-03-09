@@ -99,14 +99,16 @@ async def _build_response(session) -> dict:
 
     memberships, profile_resp = await _gather(
         AuthManager.get_user_memberships(session.access_token, str(user.id)),
-        admin.table("profiles").select("is_platform_admin").eq("id", str(user.id)).maybe_single().execute(),
+        # Use limit(1) instead of maybe_single() — avoids db_204 error when no row found
+        admin.table("profiles").select("is_platform_admin").eq("id", str(user.id)).limit(1).execute(),
     )
 
     # Read is_platform_admin from DB (source of truth — JWT may be stale
     # if promotion was done via SQL without going through the API)
     is_admin = False
-    if profile_resp and profile_resp.data:
-        is_admin = bool(profile_resp.data.get("is_platform_admin", False))
+    profile_data = (profile_resp.data or [None])[0] if profile_resp else None
+    if profile_data:
+        is_admin = bool(profile_data.get("is_platform_admin", False))
     else:
         is_admin = user.user_metadata.get("is_platform_admin", False)
 
@@ -147,6 +149,7 @@ async def _log_auth_event(action: str, user_id: str, email: str, metadata: dict 
                 "resource_id": user_id,
                 "metadata": metadata or {},
             })
+            .select("id")
             .execute()
         )
     except Exception as exc:
