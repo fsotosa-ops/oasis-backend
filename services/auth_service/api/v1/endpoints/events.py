@@ -64,7 +64,12 @@ async def join_event(
 
     event = event_resp.data
     org_id = event["organization_id"]
-    journey_ids = [ej["journey_id"] for ej in (event.get("event_journeys") or [])]
+    raw_event_journeys = event.get("event_journeys") or []
+    journey_ids = [ej["journey_id"] for ej in raw_event_journeys]
+    logger.info(
+        "join_event: event=%s org=%s raw_event_journeys=%s journey_ids=%s",
+        event_id, org_id, raw_event_journeys, journey_ids,
+    )
 
     org_joined = False
     attendance_registered = False
@@ -133,9 +138,13 @@ async def join_event(
                 logger.info("join_event: user %s already enrolled in journey %s", user_id, first_journey_id)
             # Always return the journey ID so the frontend can redirect
             journey_enrolled = first_journey_id
-        except Exception:
-            logger.warning("join_event: failed to enroll user %s in journey %s", user_id, first_journey_id)
+        except Exception as exc:
+            logger.exception("join_event: failed to enroll user %s in journey %s: %s", user_id, first_journey_id, exc)
 
+    logger.info(
+        "join_event: RESPONSE event_id=%s journey_enrolled=%s org_joined=%s attendance=%s",
+        event_id, journey_enrolled, org_joined, attendance_registered,
+    )
     return JoinEventResponse(
         event_id=event_id,
         organization_id=org_id,
