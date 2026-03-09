@@ -73,7 +73,7 @@ async def join_event(
 
     # 2. Upsert organization_members (auto-join org as participante)
     try:
-        await admin.table("organization_members").upsert(
+        await admin.schema("public").table("organization_members").upsert(
             {
                 "organization_id": org_id,
                 "user_id": user_id,
