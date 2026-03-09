@@ -137,6 +137,7 @@ async def join_event(
 
     return JoinEventResponse(
         event_id=event_id,
+        organization_id=org_id,
         org_joined=org_joined,
         attendance_registered=attendance_registered,
         journey_enrolled=journey_enrolled,

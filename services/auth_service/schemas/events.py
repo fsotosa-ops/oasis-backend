@@ -139,6 +139,7 @@ class EventJourneyResponse(BaseModel):
 
 class JoinEventResponse(BaseModel):
     event_id: str
+    organization_id: str
     org_joined: bool
     attendance_registered: bool
     journey_enrolled: str | None = None

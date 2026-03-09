@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from supabase import AsyncClient
 
@@ -26,6 +26,7 @@ async def onboarding_check(
     current_user: CurrentUser,
     memberships: UserMemberships,
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+    org_id: str | None = Query(None, description="Target org; defaults to first active membership"),
 ):
     """
     Returns whether the participant should see the onboarding journey gate.
@@ -37,12 +38,19 @@ async def onboarding_check(
     """
     user_id = str(current_user.id)
 
-    # Get first active membership org_id
     active = [m for m in memberships if m.get("status") == "active"]
     if not active:
         return OnboardingCheckResponse(should_show=False)
 
-    org_id = active[0]["organization_id"]
+    # Use provided org_id if valid (user must be a member), else first active
+    if org_id:
+        matching = [m for m in active if m["organization_id"] == org_id]
+        if matching:
+            org_id = matching[0]["organization_id"]
+        else:
+            org_id = active[0]["organization_id"]
+    else:
+        org_id = active[0]["organization_id"]
 
     try:
         # Fetch gamification config to get profile_completion_journey_id
