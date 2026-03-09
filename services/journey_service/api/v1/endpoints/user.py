@@ -59,10 +59,10 @@ async def onboarding_check(
             .table("gamification_config")
             .select("profile_completion_journey_id")
             .eq("organization_id", org_id)
-            .maybe_single()
             .execute()
         )
-        config = config_resp.data
+        configs = config_resp.data if config_resp else []
+        config = configs[0] if configs else None
         if not config or not config.get("profile_completion_journey_id"):
             return OnboardingCheckResponse(should_show=False)
 
@@ -75,10 +75,10 @@ async def onboarding_check(
             .select("status")
             .eq("user_id", user_id)
             .eq("journey_id", journey_id)
-            .maybe_single()
             .execute()
         )
-        enrollment = enrollment_resp.data
+        enrollments = enrollment_resp.data if enrollment_resp else []
+        enrollment = enrollments[0] if enrollments else None
 
         if enrollment and enrollment.get("status") == "completed":
             return OnboardingCheckResponse(should_show=False)
