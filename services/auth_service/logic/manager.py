@@ -6,6 +6,23 @@ from common.database.client import get_admin_client, get_public_client, get_scop
 logger = logging.getLogger("oasis.auth_manager")
 
 
+def _flatten_memberships(rows: list[dict]) -> list[dict]:
+    """Flatten nested organization data from Supabase join into flat dicts."""
+    result = []
+    for row in rows:
+        org = row.get("organizations") or {}
+        result.append({
+            "id": row["id"],
+            "organization_id": row["organization_id"],
+            "role": row["role"],
+            "status": row["status"],
+            "joined_at": row.get("joined_at"),
+            "organization_name": org.get("name"),
+            "organization_slug": org.get("slug"),
+        })
+    return result
+
+
 class AuthManager:
 
     @staticmethod
@@ -84,10 +101,10 @@ class AuthManager:
 
     @staticmethod
     async def get_user_memberships(token: str, user_id: str) -> list[dict]:
-        """Obtiene las membresías de organizaciones del usuario."""
-        client = await get_scoped_client(token)
+        """Obtiene las membresías de organizaciones del usuario via admin client (bypasses RLS)."""
+        admin = await get_admin_client()
         response = (
-            await client.table("organization_members")
+            await admin.table("organization_members")
             .select(
                 "id, organization_id, role, status, joined_at, "
                 "organizations(name, slug)"
@@ -96,18 +113,42 @@ class AuthManager:
             .eq("status", "active")
             .execute()
         )
-        memberships = []
-        for row in (response.data or []):
-            org = row.get("organizations") or {}
-            memberships.append({
-                "id": row["id"],
-                "organization_id": row["organization_id"],
-                "role": row["role"],
-                "status": row["status"],
-                "joined_at": row.get("joined_at"),
-                "organization_name": org.get("name"),
-                "organization_slug": org.get("slug"),
-            })
+        memberships = _flatten_memberships(response.data or [])
+
+        # Defensive: if DB trigger didn't fire, auto-assign to default community org
+        if not memberships:
+            try:
+                community = (
+                    await admin.table("organizations")
+                    .select("id")
+                    .eq("slug", "oasis-community")
+                    .maybe_single()
+                    .execute()
+                )
+                if community.data:
+                    await admin.table("organization_members").upsert(
+                        {
+                            "organization_id": community.data["id"],
+                            "user_id": user_id,
+                            "role": "participante",
+                            "status": "active",
+                        },
+                        on_conflict="organization_id,user_id",
+                    ).execute()
+                    response = (
+                        await admin.table("organization_members")
+                        .select(
+                            "id, organization_id, role, status, joined_at, "
+                            "organizations(name, slug)"
+                        )
+                        .eq("user_id", user_id)
+                        .eq("status", "active")
+                        .execute()
+                    )
+                    memberships = _flatten_memberships(response.data or [])
+            except Exception as exc:
+                logger.warning("Default org auto-assign failed for user %s: %s", user_id, exc)
+
         return memberships
 
     @staticmethod
@@ -190,19 +231,7 @@ class AuthManager:
             .eq("user_id", user_id)
             .execute()
         )
-        orgs = []
-        for m in (members_resp.data or []):
-            org = m.get("organizations") or {}
-            orgs.append({
-                "id": m["id"],
-                "organization_id": m["organization_id"],
-                "role": m["role"],
-                "status": m["status"],
-                "joined_at": m.get("joined_at"),
-                "organization_name": org.get("name"),
-                "organization_slug": org.get("slug"),
-            })
-        profile["organizations"] = orgs
+        profile["organizations"] = _flatten_memberships(members_resp.data or [])
         return profile
 
     @staticmethod
