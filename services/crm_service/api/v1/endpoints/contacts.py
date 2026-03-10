@@ -122,15 +122,18 @@ async def _try_award_profile_completion_points(db: AsyncClient, user_id: str, co
         user_id, step_id_str, journey_id_str, filled,
     )
 
-async def _try_complete_profile_field_steps(db: AsyncClient, user_id: str, contact: dict) -> None:
-    """Auto-completa steps de tipo profile_field cuyas field_names ya están todas llenas.
+async def _try_complete_profile_field_steps(
+    db: AsyncClient, user_id: str, contact: dict, updated_fields: set[str]
+) -> None:
+    """Auto-completa steps de tipo profile_field cuyas field_names ya están todas llenas,
+    pero solo si al menos uno de sus campos fue actualizado en esta petición.
 
     Flujo:
     1. Busca la org del usuario.
     2. Lee gamification_config para obtener profile_completion_journey_id.
     3. Obtiene todos los steps de ese journey.
-    4. Para cada step de tipo profile_field: si todos sus field_names tienen valor en el contacto
-       → marca el step como completado (idempotente).
+    4. Para cada step de tipo profile_field: si al menos uno de sus field_names fue actualizado
+       Y todos sus field_names tienen valor en el contacto → marca el step como completado.
     """
     # 1. Buscar organización
     membership = (
@@ -177,6 +180,10 @@ async def _try_complete_profile_field_steps(db: AsyncClient, user_id: str, conta
         field_names: list[str] = step_config.get("field_names", [])
 
         if not field_names:
+            continue
+
+        # Solo auto-completar si al menos uno de los campos del step fue actualizado
+        if not updated_fields.intersection(field_names):
             continue
 
         all_filled = all(bool(contact.get(f)) for f in field_names)
@@ -291,7 +298,7 @@ async def update_my_contact(
 
     # Auto-completar steps de tipo profile_field cubiertos por los campos guardados
     try:
-        await _try_complete_profile_field_steps(db, user_id, saved_contact)
+        await _try_complete_profile_field_steps(db, user_id, saved_contact, set(update_data.keys()))
     except Exception:
         logger.exception("profile_field: unexpected error for user=%s", user_id)
 
