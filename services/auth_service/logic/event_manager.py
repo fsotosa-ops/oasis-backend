@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from common.database.client import get_admin_client, get_scoped_client
+from supabase import AsyncClient
+
+from common.database.client import get_admin_client
 from common.exceptions import NotFoundError
 
 logger = logging.getLogger("oasis.event_manager")
@@ -15,11 +17,10 @@ class EventManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def list_org_events(token: str, org_id: str) -> list[dict]:
+    async def list_org_events(db: AsyncClient, org_id: str) -> list[dict]:
         """Lista eventos de la organización con journey_ids y conteo de asistentes."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("org_events")
+            await db.schema("crm").table("org_events")
             .select("*, event_journeys(journey_id), event_attendances(id)")
             .eq("organization_id", org_id)
             .order("created_at", desc=True)
@@ -28,11 +29,10 @@ class EventManager:
         return [EventManager._flatten_event(row) for row in (response.data or [])]
 
     @staticmethod
-    async def get_event(token: str, org_id: str, event_id: str) -> dict:
+    async def get_event(db: AsyncClient, org_id: str, event_id: str) -> dict:
         """Obtiene un evento verificando que pertenece a la org."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("org_events")
+            await db.schema("crm").table("org_events")
             .select("*, event_journeys(journey_id), event_attendances(id)")
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -59,12 +59,11 @@ class EventManager:
         return EventManager._flatten_event(response.data)
 
     @staticmethod
-    async def create_event(token: str, org_id: str, data: dict) -> dict:
+    async def create_event(db: AsyncClient, org_id: str, data: dict) -> dict:
         """Crea un evento para la organización."""
-        client = await get_scoped_client(token)
         payload = {**data, "organization_id": org_id}
         response = (
-            await client.schema("crm").table("org_events")
+            await db.schema("crm").table("org_events")
             .insert(payload)
             .execute()
         )
@@ -74,11 +73,10 @@ class EventManager:
         return row
 
     @staticmethod
-    async def update_event(token: str, org_id: str, event_id: str, data: dict) -> dict:
+    async def update_event(db: AsyncClient, org_id: str, event_id: str, data: dict) -> dict:
         """Actualiza un evento."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("org_events")
+            await db.schema("crm").table("org_events")
             .update(data)
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -86,14 +84,13 @@ class EventManager:
         )
         if not response.data:
             raise NotFoundError("Evento")
-        return await EventManager.get_event(token, org_id, event_id)
+        return await EventManager.get_event(db, org_id, event_id)
 
     @staticmethod
-    async def delete_event(token: str, org_id: str, event_id: str) -> None:
+    async def delete_event(db: AsyncClient, org_id: str, event_id: str) -> None:
         """Elimina un evento (CASCADE elimina event_journeys y event_attendances)."""
-        client = await get_scoped_client(token)
         await (
-            client.schema("crm").table("org_events")
+            db.schema("crm").table("org_events")
             .delete()
             .eq("id", event_id)
             .eq("organization_id", org_id)
@@ -105,11 +102,10 @@ class EventManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def list_event_journeys(token: str, event_id: str) -> list[dict]:
+    async def list_event_journeys(db: AsyncClient, event_id: str) -> list[dict]:
         """Lista los journeys asignados a un evento."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("event_journeys")
+            await db.schema("crm").table("event_journeys")
             .select("*")
             .eq("event_id", event_id)
             .execute()
@@ -117,22 +113,20 @@ class EventManager:
         return response.data or []
 
     @staticmethod
-    async def add_journey_to_event(token: str, event_id: str, journey_id: str) -> dict:
+    async def add_journey_to_event(db: AsyncClient, event_id: str, journey_id: str) -> dict:
         """Asigna un journey a un evento."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("event_journeys")
+            await db.schema("crm").table("event_journeys")
             .insert({"event_id": event_id, "journey_id": journey_id})
             .execute()
         )
         return response.data[0]
 
     @staticmethod
-    async def remove_journey_from_event(token: str, event_id: str, journey_id: str) -> None:
+    async def remove_journey_from_event(db: AsyncClient, event_id: str, journey_id: str) -> None:
         """Desasigna un journey de un evento."""
-        client = await get_scoped_client(token)
         await (
-            client.schema("crm").table("event_journeys")
+            db.schema("crm").table("event_journeys")
             .delete()
             .eq("event_id", event_id)
             .eq("journey_id", journey_id)
@@ -144,7 +138,7 @@ class EventManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def list_attendances(token: str, event_id: str) -> list[dict]:
+    async def list_attendances(event_id: str) -> list[dict]:
         """Lista asistentes de un evento con datos del perfil."""
         admin = await get_admin_client()
         response = (
@@ -165,25 +159,23 @@ class EventManager:
         return result
 
     @staticmethod
-    async def register_attendance(token: str, event_id: str, data: dict) -> dict:
+    async def register_attendance(db: AsyncClient, event_id: str, data: dict) -> dict:
         """Registra un asistente al evento (admin lo registra manualmente)."""
-        client = await get_scoped_client(token)
         payload = {**data, "event_id": event_id}
         if "user_id" in payload:
             payload["user_id"] = str(payload["user_id"])
         response = (
-            await client.schema("crm").table("event_attendances")
+            await db.schema("crm").table("event_attendances")
             .insert(payload)
             .execute()
         )
         return response.data[0]
 
     @staticmethod
-    async def update_attendance(token: str, attendance_id: str, data: dict) -> dict:
+    async def update_attendance(db: AsyncClient, attendance_id: str, data: dict) -> dict:
         """Actualiza el status o modalidad de un registro de asistencia."""
-        client = await get_scoped_client(token)
         response = (
-            await client.schema("crm").table("event_attendances")
+            await db.schema("crm").table("event_attendances")
             .update(data)
             .eq("id", attendance_id)
             .execute()
@@ -193,11 +185,10 @@ class EventManager:
         return response.data[0]
 
     @staticmethod
-    async def remove_attendance(token: str, attendance_id: str) -> None:
+    async def remove_attendance(db: AsyncClient, attendance_id: str) -> None:
         """Elimina un registro de asistencia."""
-        client = await get_scoped_client(token)
         await (
-            client.schema("crm").table("event_attendances")
+            db.schema("crm").table("event_attendances")
             .delete()
             .eq("id", attendance_id)
             .execute()

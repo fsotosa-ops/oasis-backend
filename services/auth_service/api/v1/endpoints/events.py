@@ -7,8 +7,9 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, status
+from supabase import AsyncClient
 
-from common.auth.security import CurrentUser, OrgContext, OrgRoleRequired, get_current_token
+from common.auth.security import CurrentUser, OrgContext, OrgRoleRequired
 from common.database.client import get_admin_client
 from services.auth_service.logic.event_manager import EventManager
 from services.auth_service.schemas.events import (
@@ -158,54 +159,54 @@ async def join_event(
 
 @router.get("", response_model=list[EventResponse])
 async def list_events(
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Lista todos los eventos de la organización."""
-    return await EventManager.list_org_events(token, org.organization_id)
+    return await EventManager.list_org_events(db, org.organization_id)
 
 
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 async def create_event(
     data: EventCreate,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Crea un evento para la organización."""
     payload = data.model_dump(mode="json", exclude_unset=True)
-    return await EventManager.create_event(token, org.organization_id, payload)
+    return await EventManager.create_event(db, org.organization_id, payload)
 
 
 @router.get("/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Obtiene el detalle de un evento."""
-    return await EventManager.get_event(token, org.organization_id, event_id)
+    return await EventManager.get_event(db, org.organization_id, event_id)
 
 
 @router.patch("/{event_id}", response_model=EventResponse)
 async def update_event(
     event_id: str,
     data: EventUpdate,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Actualiza un evento."""
     payload = data.model_dump(mode="json", exclude_unset=True)
-    return await EventManager.update_event(token, org.organization_id, event_id, payload)
+    return await EventManager.update_event(db, org.organization_id, event_id, payload)
 
 
 @router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_event(
     event_id: str,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Elimina un evento."""
-    await EventManager.delete_event(token, org.organization_id, event_id)
+    await EventManager.delete_event(db, org.organization_id, event_id)
 
 
 # ---------------------------------------------------------------------------
@@ -215,11 +216,11 @@ async def delete_event(
 @router.get("/{event_id}/journeys", response_model=list[EventJourneyResponse])
 async def list_event_journeys(
     event_id: str,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Lista los journeys asignados a un evento."""
-    return await EventManager.list_event_journeys(token, event_id)
+    return await EventManager.list_event_journeys(db, event_id)
 
 
 @router.post(
@@ -230,11 +231,11 @@ async def list_event_journeys(
 async def add_journey_to_event(
     event_id: str,
     data: EventJourneyAdd,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Asigna un journey a un evento."""
-    return await EventManager.add_journey_to_event(token, event_id, str(data.journey_id))
+    return await EventManager.add_journey_to_event(db, event_id, str(data.journey_id))
 
 
 @router.delete(
@@ -244,11 +245,11 @@ async def add_journey_to_event(
 async def remove_journey_from_event(
     event_id: str,
     journey_id: str,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Desasigna un journey de un evento."""
-    await EventManager.remove_journey_from_event(token, event_id, journey_id)
+    await EventManager.remove_journey_from_event(db, event_id, journey_id)
 
 
 # ---------------------------------------------------------------------------
@@ -258,11 +259,10 @@ async def remove_journey_from_event(
 @router.get("/{event_id}/attendances", response_model=list[AttendanceResponse])
 async def list_attendances(
     event_id: str,
-    token: str = Depends(get_current_token),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Lista los asistentes de un evento."""
-    return await EventManager.list_attendances(token, event_id)
+    return await EventManager.list_attendances(event_id)
 
 
 @router.post(
@@ -273,12 +273,12 @@ async def list_attendances(
 async def register_attendance(
     event_id: str,
     data: AttendanceCreate,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Registra un asistente al evento (el admin registra manualmente)."""
     payload = data.model_dump(mode="json", exclude_unset=True)
-    return await EventManager.register_attendance(token, event_id, payload)
+    return await EventManager.register_attendance(db, event_id, payload)
 
 
 @router.patch(
@@ -289,12 +289,12 @@ async def update_attendance(
     event_id: str,  # noqa: ARG001 — validated by OrgRoleRequired
     attendance_id: str,
     data: AttendanceUpdate,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Actualiza status o modalidad de un registro (ej: marcar como 'attended')."""
     payload = data.model_dump(mode="json", exclude_unset=True)
-    return await EventManager.update_attendance(token, attendance_id, payload)
+    return await EventManager.update_attendance(db, attendance_id, payload)
 
 
 @router.delete(
@@ -304,8 +304,8 @@ async def update_attendance(
 async def remove_attendance(
     event_id: str,  # noqa: ARG001
     attendance_id: str,
-    token: str = Depends(get_current_token),
+    db: AsyncClient = Depends(get_admin_client),
     _org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
 ):
     """Elimina un registro de asistencia."""
-    await EventManager.remove_attendance(token, attendance_id)
+    await EventManager.remove_attendance(db, attendance_id)
