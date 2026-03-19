@@ -109,6 +109,7 @@ AUTH_CODE_TO_STATUS: dict[str, tuple[int, str]] = {
     "validation_failed": (422, "auth_validation_failed"),
     "over_request_rate_limit": (429, "auth_rate_limit"),
     "over_email_send_rate_limit": (429, "auth_rate_limit"),
+    "unexpected_failure": (503, "auth_email_service_unavailable"),
 }
 
 
