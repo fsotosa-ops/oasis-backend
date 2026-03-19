@@ -4,7 +4,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+import re
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,24 @@ class MembershipStatus(StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# Password strength validation
+# ---------------------------------------------------------------------------
+_PASSWORD_RULES: list[tuple[str, str]] = [
+    (r"[A-Z]", "Debe contener al menos una letra mayúscula"),
+    (r"[a-z]", "Debe contener al menos una letra minúscula"),
+    (r"[0-9]", "Debe contener al menos un número"),
+    (r"[^A-Za-z0-9]", "Debe contener al menos un carácter especial"),
+]
+
+
+def _validate_password_strength(password: str) -> str:
+    for pattern, msg in _PASSWORD_RULES:
+        if not re.search(pattern, password):
+            raise ValueError(msg)
+    return password
+
+
+# ---------------------------------------------------------------------------
 # Auth request schemas
 # ---------------------------------------------------------------------------
 class UserLogin(BaseModel):
@@ -51,12 +71,24 @@ class UserRegister(BaseModel):
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
 
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = Field(None, min_length=8)
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_password_strength(v)
+        return v
 
 
 class PasswordResetRequest(BaseModel):
@@ -65,6 +97,11 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordUpdate(BaseModel):
     new_password: str = Field(..., min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class RefreshTokenRequest(BaseModel):
@@ -116,6 +153,11 @@ class AdminUserCreate(BaseModel):
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     is_platform_admin: bool = False
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class AdminUserUpdate(BaseModel):
