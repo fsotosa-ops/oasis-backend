@@ -141,6 +141,8 @@ class AuthManager:
                     len(all_org_ids), len(member_org_ids), len(missing_org_ids),
                 )
 
+                needs_refetch = False
+
                 if missing_org_ids:
                     rows = [
                         {
@@ -155,7 +157,20 @@ class AuthManager:
                         rows, on_conflict="organization_id,user_id"
                     ).execute()
                     logger.info("SuperAdmin auto-assign: upserted %d memberships", len(rows))
-                    # Re-fetch memberships
+                    needs_refetch = True
+
+                # Upgrade existing memberships that aren't "owner"
+                non_owner_ids = [m["organization_id"] for m in memberships if m["role"] != "owner"]
+                if non_owner_ids:
+                    await admin.table("organization_members") \
+                        .update({"role": "owner"}) \
+                        .eq("user_id", user_id) \
+                        .neq("role", "owner") \
+                        .execute()
+                    logger.info("SuperAdmin role upgrade: upgraded %d memberships to owner", len(non_owner_ids))
+                    needs_refetch = True
+
+                if needs_refetch:
                     response = (
                         await admin.table("organization_members")
                         .select(
