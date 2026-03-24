@@ -20,7 +20,14 @@ from services.crm_service.dependencies import (
     CrmReadAccess,
     CrmWriteAccess,
 )
-from services.crm_service.schemas.contacts import ContactEventParticipation, ContactResponse, ContactUpdate, PaginatedContactsResponse
+from services.crm_service.schemas.contacts import (
+    AssignEventRequest,
+    AssignEventResponse,
+    ContactEventParticipation,
+    ContactResponse,
+    ContactUpdate,
+    PaginatedContactsResponse,
+)
 from services.crm_service.schemas.notes import NoteCreate, NoteResponse
 from services.crm_service.schemas.tasks import TaskCreate, TaskResponse
 from services.gamification_service.crud import config as gamif_config_crud
@@ -584,3 +591,142 @@ async def get_contact_events(
         {"p_user_id": str(user_id)},
     ).execute()
     return result.data or []
+
+
+# ---------------------------------------------------------------------------
+# Assign event to contact (admin-side join_event)
+# ---------------------------------------------------------------------------
+@router.post(
+    "/{user_id}/assign-event",
+    response_model=AssignEventResponse,
+    status_code=201,
+    summary="Asignar un evento a un contacto (admin)",
+)
+async def assign_event_to_contact(
+    user_id: UUID,
+    body: AssignEventRequest,
+    ctx: CrmContext = Depends(CrmGlobalWriteAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Admin-side event assignment: org membership + attendance + journey enrollment."""
+    from services.auth_service.logic.event_manager import EventManager
+
+    uid = str(user_id)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. Fetch event
+    event_resp = (
+        await db.schema("crm").table("org_events")
+        .select("*")
+        .eq("id", body.event_id)
+        .single()
+        .execute()
+    )
+    if not event_resp.data:
+        raise NotFoundError("Evento")
+    event = event_resp.data
+    org_id = event["organization_id"]
+
+    # 2. Get journey ids linked to this event
+    journey_ids = await EventManager.get_event_journey_ids(body.event_id)
+    logger.info("assign_event: user=%s event=%s org=%s journeys=%s", uid, body.event_id, org_id, journey_ids)
+
+    org_joined = False
+    attendance_registered = False
+    journeys_enrolled: list[str] = []
+
+    # 3. Upsert organization_members (role=participante)
+    try:
+        await db.schema("public").table("organization_members").upsert(
+            {
+                "organization_id": org_id,
+                "user_id": uid,
+                "role": "participante",
+                "status": "active",
+                "joined_at": now,
+            },
+            on_conflict="organization_id,user_id",
+        ).execute()
+        org_joined = True
+    except Exception:
+        logger.warning("assign_event: failed to upsert org membership user=%s org=%s", uid, org_id)
+
+    # 4. Upsert event_attendances
+    try:
+        await db.schema("crm").table("event_attendances").upsert(
+            {
+                "event_id": body.event_id,
+                "user_id": uid,
+                "status": "registered",
+                "modality": body.modality,
+                "registered_at": now,
+            },
+            on_conflict="event_id,user_id",
+        ).execute()
+        attendance_registered = True
+    except Exception:
+        logger.warning("assign_event: failed to upsert attendance user=%s event=%s", uid, body.event_id)
+
+    # 5. Enroll in ALL linked journeys (not just the first, unlike self-service)
+    for jid in journey_ids:
+        try:
+            existing = (
+                await db.schema("journeys").table("enrollments")
+                .select("id")
+                .eq("user_id", uid)
+                .eq("journey_id", jid)
+                .eq("status", "active")
+                .execute()
+            )
+            if not existing.data:
+                await db.schema("journeys").table("enrollments").insert(
+                    {
+                        "user_id": uid,
+                        "journey_id": jid,
+                        "event_id": body.event_id,
+                        "status": "active",
+                        "current_step_index": 0,
+                        "started_at": now,
+                    }
+                ).execute()
+                logger.info("assign_event: enrolled user=%s journey=%s", uid, jid)
+            else:
+                logger.info("assign_event: user=%s already enrolled in journey=%s", uid, jid)
+            journeys_enrolled.append(jid)
+        except Exception:
+            logger.exception("assign_event: failed to enroll user=%s journey=%s", uid, jid)
+
+    return AssignEventResponse(
+        event_id=body.event_id,
+        organization_id=org_id,
+        org_joined=org_joined,
+        attendance_registered=attendance_registered,
+        journeys_enrolled=journeys_enrolled,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Remove attendance from contact
+# ---------------------------------------------------------------------------
+@router.delete(
+    "/{user_id}/events/{attendance_id}",
+    status_code=204,
+    summary="Eliminar asistencia de un contacto a un evento",
+)
+async def remove_contact_attendance(
+    user_id: UUID,
+    attendance_id: UUID,
+    ctx: CrmContext = Depends(CrmGlobalWriteAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    """Delete an event_attendances row. Does NOT remove journey enrollments."""
+    result = (
+        await db.schema("crm").table("event_attendances")
+        .delete()
+        .eq("id", str(attendance_id))
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+    if not result.data:
+        raise NotFoundError("Attendance")
+    return None

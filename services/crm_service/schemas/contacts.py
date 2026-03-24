@@ -68,6 +68,23 @@ class ContactEventParticipation(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Event assignment (admin-side)
+# ---------------------------------------------------------------------------
+
+class AssignEventRequest(BaseModel):
+    event_id: str
+    modality: str = "presencial"
+
+
+class AssignEventResponse(BaseModel):
+    event_id: str
+    organization_id: str
+    org_joined: bool
+    attendance_registered: bool
+    journeys_enrolled: list[str]
+
+
+# ---------------------------------------------------------------------------
 # Field Options (configurable select options for gender, education, occupation)
 # ---------------------------------------------------------------------------
 
