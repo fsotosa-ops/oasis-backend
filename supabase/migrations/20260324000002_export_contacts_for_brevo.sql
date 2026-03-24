@@ -1,8 +1,13 @@
 -- Migration: Create RPC function to export contacts as a flat table for Brevo CSV
 -- Follows SECURITY DEFINER pattern from get_contact_events
+-- Supports filtering by multiple organizations and/or created_at date range
+
+DROP FUNCTION IF EXISTS public.export_contacts_for_brevo(UUID);
 
 CREATE OR REPLACE FUNCTION public.export_contacts_for_brevo(
-    p_organization_id UUID DEFAULT NULL
+    p_organization_ids UUID[] DEFAULT NULL,
+    p_created_from     TIMESTAMPTZ DEFAULT NULL,
+    p_created_to       TIMESTAMPTZ DEFAULT NULL
 )
 RETURNS TABLE (
     user_id          TEXT,
@@ -38,13 +43,17 @@ AS $$
     WITH contact_base AS (
         SELECT c.*
         FROM crm.contacts c
-        WHERE p_organization_id IS NULL
-           OR EXISTS (
-               SELECT 1 FROM public.organization_members om
-               WHERE om.user_id = c.user_id
-                 AND om.organization_id = p_organization_id
-                 AND om.status = 'active'
-           )
+        WHERE (
+            p_organization_ids IS NULL
+            OR EXISTS (
+                SELECT 1 FROM public.organization_members om
+                WHERE om.user_id = c.user_id
+                  AND om.organization_id = ANY(p_organization_ids)
+                  AND om.status = 'active'
+            )
+        )
+        AND (p_created_from IS NULL OR c.created_at >= p_created_from)
+        AND (p_created_to   IS NULL OR c.created_at <= p_created_to)
     ),
     contact_orgs AS (
         SELECT
@@ -97,7 +106,8 @@ AS $$
             l.name AS level_name
         FROM contact_points cp
         JOIN journeys.levels l ON cp.total_points >= l.min_points
-        WHERE (l.organization_id = p_organization_id OR l.organization_id IS NULL)
+        WHERE l.organization_id IS NULL
+           OR (p_organization_ids IS NOT NULL AND l.organization_id = ANY(p_organization_ids))
         ORDER BY cp.user_id, l.min_points DESC
     ),
     contact_active_journeys AS (
