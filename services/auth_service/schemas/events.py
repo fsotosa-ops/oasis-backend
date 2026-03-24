@@ -61,6 +61,13 @@ class EventDiagnosis(BaseModel):
     main_obstacles: Optional[str] = None
 
 
+class EventLocationDetails(BaseModel):
+    country: Optional[str] = None   # ISO code e.g. "CL"
+    state: Optional[str] = None     # ISO code e.g. "RM"
+    city: Optional[str] = None      # Name e.g. "Santiago"
+    locality: Optional[str] = None  # Free text
+
+
 # ---------------------------------------------------------------------------
 # Event CRUD
 # ---------------------------------------------------------------------------
@@ -72,6 +79,7 @@ class EventCreate(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     location: Optional[str] = None
+    location_details: EventLocationDetails = Field(default_factory=EventLocationDetails)
     status: EventStatus = EventStatus.upcoming
     notes: Optional[str] = None
     expected_participants: Optional[int] = None
@@ -86,6 +94,7 @@ class EventUpdate(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     location: Optional[str] = None
+    location_details: Optional[EventLocationDetails] = None
     status: Optional[EventStatus] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
@@ -104,6 +113,7 @@ class EventResponse(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     location: Optional[str] = None
+    location_details: EventLocationDetails = Field(default_factory=EventLocationDetails)
     status: EventStatus
     is_active: bool
     notes: Optional[str] = None
