@@ -1,7 +1,11 @@
+import csv
+import io
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from common.auth.security import CurrentUser
 from common.database.client import get_admin_client
@@ -236,6 +240,87 @@ async def get_my_contact(
     if not contact:
         raise NotFoundError("Contact")
     return contact
+
+
+COUNTRY_NAMES: dict[str, str] = {
+    "CL": "Chile",
+    "AR": "Argentina",
+    "CO": "Colombia",
+    "MX": "México",
+    "PE": "Perú",
+    "BR": "Brasil",
+    "EC": "Ecuador",
+    "BO": "Bolivia",
+    "UY": "Uruguay",
+    "PY": "Paraguay",
+    "VE": "Venezuela",
+    "CR": "Costa Rica",
+    "PA": "Panamá",
+    "GT": "Guatemala",
+    "HN": "Honduras",
+    "SV": "El Salvador",
+    "NI": "Nicaragua",
+    "DO": "República Dominicana",
+    "CU": "Cuba",
+    "PR": "Puerto Rico",
+    "US": "Estados Unidos",
+    "ES": "España",
+}
+
+CSV_COLUMNS = [
+    "USER_ID", "EMAIL", "FIRSTNAME", "LASTNAME", "PHONE", "COMPANY",
+    "COUNTRY", "STATE", "CITY", "BIRTH_DATE", "GENDER", "EDUCATION_LEVEL",
+    "OCCUPATION", "CRM_STATUS", "OASIS_SCORE", "ORGANIZATIONS",
+    "TOTAL_EVENTS_ATTENDED", "LAST_EVENT_NAME", "LAST_EVENT_DATE",
+    "TOTAL_POINTS", "CURRENT_LEVEL", "ACTIVE_JOURNEYS", "PENDING_JOURNEYS",
+    "COMPLETED_JOURNEYS", "LAST_SEEN_AT", "CREATED_AT",
+]
+
+# Map RPC result keys → CSV column order
+_RPC_KEYS = [
+    "user_id", "email", "first_name", "last_name", "phone", "company",
+    "country", "state", "city", "birth_date", "gender", "education_level",
+    "occupation", "crm_status", "oasis_score", "organizations",
+    "total_events_attended", "last_event_name", "last_event_date",
+    "total_points", "current_level", "active_journeys", "pending_journeys",
+    "completed_journeys", "last_seen_at", "created_at",
+]
+
+
+@router.get("/export/csv", summary="Exportar contactos como CSV para Brevo")
+async def export_contacts_csv(
+    organization_id: UUID | None = Query(None),
+    ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    params: dict = {}
+    org_id = organization_id or ctx.organization_id
+    if org_id:
+        params["p_organization_id"] = str(org_id)
+
+    result = await db.rpc("export_contacts_for_brevo", params).execute()
+    rows = result.data or []
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(CSV_COLUMNS)
+
+    for row in rows:
+        values = [row.get(k, "") or "" for k in _RPC_KEYS]
+        # Resolve country ISO code → name
+        country_val = values[6]
+        if country_val and len(country_val) == 2:
+            values[6] = COUNTRY_NAMES.get(country_val.upper(), country_val)
+        writer.writerow(values)
+
+    now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"contacts_brevo_{now}.csv"
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/{contact_id}", response_model=ContactResponse)
