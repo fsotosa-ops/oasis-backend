@@ -295,23 +295,20 @@ async def export_contacts_csv(
     ctx: CrmContext = Depends(CrmGlobalReadAccess),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):
-    params: dict = {}
-
     # Build org IDs array
-    org_ids_list: list[str] = []
+    org_ids_list: list[str] | None = None
     if organization_ids:
         org_ids_list = [s.strip() for s in organization_ids.split(",") if s.strip()]
     elif ctx.organization_id:
         # Non-superadmin: always scoped to their org
         org_ids_list = [str(ctx.organization_id)]
 
-    if org_ids_list:
-        params["p_organization_ids"] = org_ids_list
-
-    if created_from:
-        params["p_created_from"] = f"{created_from}T00:00:00Z"
-    if created_to:
-        params["p_created_to"] = f"{created_to}T23:59:59Z"
+    # PostgREST requires ALL params to be present to match the function signature
+    params: dict = {
+        "p_organization_ids": org_ids_list,
+        "p_created_from": f"{created_from}T00:00:00Z" if created_from else None,
+        "p_created_to": f"{created_to}T23:59:59Z" if created_to else None,
+    }
 
     result = await db.rpc("export_contacts_for_brevo", params).execute()
     rows = result.data or []
