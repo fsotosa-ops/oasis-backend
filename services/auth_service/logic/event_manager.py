@@ -139,24 +139,45 @@ class EventManager:
 
     @staticmethod
     async def list_attendances(event_id: str) -> list[dict]:
-        """Lista asistentes de un evento con datos del perfil."""
+        """Lista asistentes de un evento con datos del perfil.
+
+        Hace dos queries (attendances + profiles) en lugar de un PostgREST embed
+        porque el FK `crm.event_attendances.user_id → public.profiles(id)` es
+        cross-schema, y PostgREST no expone esa relación en el schema cache —
+        el embed `profiles!event_attendances_user_id_fkey(...)` falla con
+        "Could not find a relationship between 'event_attendances' and 'profiles'".
+        Mismo patrón usado en journey_service/crud/journeys.py:758-764.
+        """
         admin = await get_admin_client()
-        response = (
+
+        # 1. Fetch attendances
+        att_resp = (
             await admin.schema("crm").table("event_attendances")
-            .select(
-                "*, profiles!event_attendances_user_id_fkey(email, full_name)"
-            )
+            .select("*")
             .eq("event_id", event_id)
             .order("registered_at", desc=False)
             .execute()
         )
-        result = []
-        for row in (response.data or []):
-            profile = row.pop("profiles", None) or {}
+        rows = att_resp.data or []
+        if not rows:
+            return []
+
+        # 2. Fetch profiles by user_id (separate query — public schema)
+        user_ids = list({row["user_id"] for row in rows})
+        prof_resp = (
+            await admin.table("profiles")
+            .select("id, email, full_name")
+            .in_("id", user_ids)
+            .execute()
+        )
+        profiles_by_id = {p["id"]: p for p in (prof_resp.data or [])}
+
+        # 3. Merge profile fields onto each attendance row
+        for row in rows:
+            profile = profiles_by_id.get(row["user_id"], {})
             row["user_email"] = profile.get("email")
             row["user_full_name"] = profile.get("full_name")
-            result.append(row)
-        return result
+        return rows
 
     @staticmethod
     async def register_attendance(db: AsyncClient, event_id: str, data: dict) -> dict:
@@ -212,6 +233,64 @@ class EventManager:
         result = [ej["journey_id"] for ej in (resp.data or [])]
         print(f"[get_event_journey_ids] event={event_id} result={result} raw={resp.data}")
         return result
+
+    # ------------------------------------------------------------------
+    # Dashboard Summary
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def get_dashboard_summary(db: AsyncClient, org_id: str) -> dict:
+        """Returns aggregated event metrics for the admin dashboard."""
+        response = (
+            await db.schema("crm").table("org_events")
+            .select("id, name, slug, status, start_date, end_date, location, expected_participants, event_attendances(status, modality)")
+            .eq("organization_id", org_id)
+            .eq("is_active", True)
+            .in_("status", ["live", "upcoming"])
+            .order("start_date", desc=False)
+            .execute()
+        )
+
+        live_events = []
+        upcoming_events = []
+        total_registered = 0
+        total_attended = 0
+
+        for row in (response.data or []):
+            attendances = row.pop("event_attendances", []) or []
+
+            registered = sum(1 for a in attendances if a["status"] == "registered")
+            attended = sum(1 for a in attendances if a["status"] == "attended")
+            no_show = sum(1 for a in attendances if a["status"] == "no_show")
+
+            modality_breakdown: dict[str, int] = {}
+            for a in attendances:
+                mod = a.get("modality", "presencial")
+                modality_breakdown[mod] = modality_breakdown.get(mod, 0) + 1
+
+            item = {
+                **row,
+                "registered_count": registered,
+                "attended_count": attended,
+                "no_show_count": no_show,
+                "modality_breakdown": modality_breakdown,
+            }
+
+            if row["status"] == "live":
+                live_events.append(item)
+                total_registered += registered
+                total_attended += attended
+            else:
+                upcoming_events.append(item)
+
+        return {
+            "live_events": live_events,
+            "upcoming_events": upcoming_events[:5],
+            "totals": {
+                "total_registered": total_registered,
+                "total_attended": total_attended,
+            },
+        }
 
     # ------------------------------------------------------------------
     # Helpers
