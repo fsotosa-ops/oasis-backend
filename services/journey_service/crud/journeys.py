@@ -390,14 +390,17 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
     """
     Devuelve la jerarquía Org → Eventos → Journeys con stats por (event_id, journey_id).
 
-    - Lee eventos desde crm.org_events para la org dada.
-    - Resuelve la asignación de journeys via crm.event_journeys.
-    - Cuenta enrollments scoped por (journey_id, event_id) — los enrollments con
-      event_id NULL quedan excluidos a propósito (no pertenecen a un evento del
-      tracking jerárquico).
-    - completion_rate se devuelve como decimal 0-1 (consistente con el resto del backend).
-    - Los enrollments se filtran adicionalmente a los miembros activos de la org para
-      que las cifras reflejen solo a los usuarios actualmente vinculados.
+    NUEVA SEMÁNTICA (cambio de modelo del funnel):
+    - La base de "inscritos" en cada (event, journey) son los **asistentes activos**
+      del evento (filas en crm.event_attendances con status registered/attended),
+      NO las filas explícitas en journeys.enrollments.
+    - El estado del funnel por usuario se determina cruzando con journeys.enrollments:
+        completed   → enrollment.status='completed'
+        active      → enrollment.status='active'
+        not_started → sin enrollment, o enrollment con status pending/dropped
+    - Los enrollments con event_id NULL quedan fuera del scope jerárquico (siguen
+      en `unassigned_journeys` con la lógica legacy).
+    - Los asistentes se filtran adicionalmente a miembros activos de la org.
     """
     # 0. Miembros activos de la org (para scoping y para el header del UI)
     members_resp = (
@@ -425,7 +428,8 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
     journey_ids: list[str] = []
     journeys_meta: dict[str, dict] = {}
     step_counts: dict[str, int] = {}
-    enrollments_rows: list[dict] = []
+    attendances_rows: list[dict] = []
+    enrollments_by_key: dict[tuple[str, str, str], str] = {}
 
     if event_ids:
         # 2. Asignaciones evento ↔ journey
@@ -459,8 +463,19 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
         for s in steps_resp.data or []:
             step_counts[s["journey_id"]] = step_counts.get(s["journey_id"], 0) + 1
 
-        # 5. Enrollments scoped a (journey_id, event_id) y a miembros activos
+        # 5. Asistentes a los eventos (la nueva base del funnel — registered/attended)
         if member_user_ids:
+            att_resp = (
+                await db.schema("crm").table("event_attendances")
+                .select("event_id, user_id, status")
+                .in_("event_id", event_ids)
+                .in_("user_id", member_user_ids)
+                .in_("status", ["registered", "attended"])
+                .execute()
+            )
+            attendances_rows = att_resp.data or []
+
+            # 6. Enrollments existentes (sólo para clasificar el estado del funnel)
             enr_resp = (
                 await db.schema("journeys").table("enrollments")
                 .select("journey_id, event_id, status, user_id")
@@ -469,23 +484,38 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
                 .in_("user_id", member_user_ids)
                 .execute()
             )
-            enrollments_rows = enr_resp.data or []
-
-    # Bucket de stats por (event_id, journey_id)
-    stats: dict[tuple[str, str], dict[str, int]] = {}
-    for row in enrollments_rows:
-        key = (row["event_id"], row["journey_id"])
-        bucket = stats.setdefault(key, {"total": 0, "active": 0, "completed": 0})
-        bucket["total"] += 1
-        if row["status"] == "active":
-            bucket["active"] += 1
-        elif row["status"] == "completed":
-            bucket["completed"] += 1
+            for row in enr_resp.data or []:
+                enrollments_by_key[
+                    (row["event_id"], row["journey_id"], row["user_id"])
+                ] = row["status"]
 
     # Mapa evento → journeys asignadas
     event_journey_map: dict[str, list[str]] = {}
     for row in ej_rows:
         event_journey_map.setdefault(row["event_id"], []).append(row["journey_id"])
+
+    # Mapa evento → asistentes (set de user_ids)
+    attendees_by_event: dict[str, set[str]] = {}
+    for row in attendances_rows:
+        attendees_by_event.setdefault(row["event_id"], set()).add(row["user_id"])
+
+    # Bucket de stats por (event_id, journey_id) — se construye desde asistentes × journeys
+    stats: dict[tuple[str, str], dict[str, int]] = {}
+    for ev_id, j_ids_in_event in event_journey_map.items():
+        event_attendees = attendees_by_event.get(ev_id, set())
+        for j_id in j_ids_in_event:
+            bucket = {"total": 0, "active": 0, "completed": 0, "not_started": 0}
+            for user_id in event_attendees:
+                bucket["total"] += 1
+                enr_status = enrollments_by_key.get((ev_id, j_id, user_id))
+                if enr_status == "completed":
+                    bucket["completed"] += 1
+                elif enr_status == "active":
+                    bucket["active"] += 1
+                else:
+                    # Sin enrollment, o pending/dropped → no iniciado
+                    bucket["not_started"] += 1
+            stats[(ev_id, j_id)] = bucket
 
     # Ensamblar respuesta
     out_events: list[dict] = []
@@ -497,7 +527,8 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
             if not meta:
                 continue
             bucket = stats.get(
-                (ev_id, j_id), {"total": 0, "active": 0, "completed": 0}
+                (ev_id, j_id),
+                {"total": 0, "active": 0, "completed": 0, "not_started": 0},
             )
             total = bucket["total"]
             tracked_journeys.append({
@@ -510,6 +541,7 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
                 "total_enrollments": total,
                 "active_enrollments": bucket["active"],
                 "completed_enrollments": bucket["completed"],
+                "not_started_enrollments": bucket["not_started"],
                 "completion_rate": (
                     round(bucket["completed"] / total, 4) if total > 0 else 0.0
                 ),
@@ -589,25 +621,30 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
                 "total_enrollments": t,
                 "active_enrollments": b["active"],
                 "completed_enrollments": b["completed"],
+                # Lógica legacy (no hay evento que sirva de base, así que not_started=0).
+                "not_started_enrollments": 0,
                 "completion_rate": round(b["completed"] / t, 4) if t > 0 else 0.0,
             })
 
-    # 7. Totales agregados (filas vs usuarios únicos)
+    # 7. Totales agregados — base = asistentes únicos en eventos con journeys
     unique_users: set[str] = set()
-    total_enrollments_count = 0
-    for row in enrollments_rows:
-        unique_users.add(row["user_id"])
-        total_enrollments_count += 1
+    total_potential = 0
+    for ev_id, j_list in event_journey_map.items():
+        ev_attendees = attendees_by_event.get(ev_id, set())
+        unique_users.update(ev_attendees)
+        total_potential += len(ev_attendees) * len(j_list)
+    # unassigned: cae a la lógica legacy (cuento enrollments reales)
     for row in unassigned_enrollments_rows:
         unique_users.add(row["user_id"])
-        total_enrollments_count += 1
 
     return {
         "organization_id": org_id,
         "events": out_events,
         "total_members": total_members,
+        # Mismo nombre, nueva semántica: asistentes únicos a eventos con journeys.
         "total_unique_enrolled_users": len(unique_users),
-        "total_enrollments": total_enrollments_count,
+        # Mismo nombre, nueva semántica: asignaciones potenciales (asistentes × journeys/evento).
+        "total_enrollments": total_potential,
         "unassigned_journeys": unassigned_journeys,
     }
 
@@ -640,19 +677,22 @@ async def list_journey_enrollees(
     status: str | None = None,
 ) -> list[dict]:
     """
-    Devuelve la lista de inscritos en un journey, filtrada al scope de la org.
+    Devuelve la lista de usuarios asociados a un journey en el contexto de un evento.
 
-    Usado por el drilldown del tab Journeys del CRM dialog (click en celdas
-    "Inscritos" / "Completados").
-
-    - Sólo incluye usuarios que son miembros activos de la org dada.
-    - Si event_id se pasa, filtra a enrollments de ese evento.
-    - Si status se pasa ('active' | 'completed' | 'pending' | 'dropped'),
-      filtra por estado.
-    - Hace dos queries (enrollments en schema 'journeys' + profiles en schema
-      'public') y mergea en Python para evitar joins cross-schema en PostgREST.
+    NUEVA SEMÁNTICA (consistente con list_org_tracking):
+    - La base son los **asistentes del evento** (registered/attended) ∩ miembros
+      activos de la org. NO las filas de journeys.enrollments.
+    - El estado del funnel se determina cruzando con journeys.enrollments en
+      (journey_id, event_id, user_id):
+        completed   → enrollment.status='completed'
+        active      → enrollment.status='active'
+        not_started → sin enrollment, o pending/dropped
+    - Si event_id es None (drilldown desde unassigned_journeys) cae al modo
+      legacy: la base son los enrollments reales filtrados a miembros activos.
+    - El parámetro `status` filtra el resultado: 'not_started' | 'active' |
+      'completed' | None (todos).
     """
-    # 1. Miembros activos de la org (mismo scoping que list_org_tracking)
+    # 1. Miembros activos de la org
     members_resp = (
         await db.table("organization_members")
         .select("user_id")
@@ -664,28 +704,59 @@ async def list_journey_enrollees(
     if not member_user_ids:
         return []
 
-    # 2. Enrollments del journey, filtrados a miembros activos
-    q = (
-        db.schema("journeys").table("enrollments")
-        .select(
-            "id, user_id, status, current_step_index, "
-            "progress_percentage, started_at, completed_at"
-        )
-        .eq("journey_id", journey_id)
-        .in_("user_id", member_user_ids)
-    )
+    user_ids: list[str]
+    enrollments_by_user: dict[str, dict] = {}
+    registered_at_by_user: dict[str, str] = {}
+
     if event_id is not None:
-        q = q.eq("event_id", event_id)
-    if status is not None:
-        q = q.eq("status", status)
+        # 2a. Caso event_id presente: base = asistentes del evento
+        att_resp = (
+            await db.schema("crm").table("event_attendances")
+            .select("user_id, registered_at")
+            .eq("event_id", event_id)
+            .in_("user_id", member_user_ids)
+            .in_("status", ["registered", "attended"])
+            .execute()
+        )
+        attendees = att_resp.data or []
+        if not attendees:
+            return []
 
-    enr_resp = await q.order("started_at", desc=True).execute()
-    enrollments = enr_resp.data or []
-    if not enrollments:
-        return []
+        user_ids = [a["user_id"] for a in attendees]
+        registered_at_by_user = {a["user_id"]: a["registered_at"] for a in attendees}
 
-    # 3. Perfiles para los user_ids encontrados
-    user_ids = list({e["user_id"] for e in enrollments})
+        # Enrollments existentes para esos usuarios en (journey, event)
+        enr_resp = (
+            await db.schema("journeys").table("enrollments")
+            .select(
+                "id, user_id, status, current_step_index, "
+                "progress_percentage, started_at, completed_at"
+            )
+            .eq("journey_id", journey_id)
+            .eq("event_id", event_id)
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        enrollments_by_user = {e["user_id"]: e for e in (enr_resp.data or [])}
+    else:
+        # 2b. Caso unassigned (event_id=None): lógica legacy — base = enrollments reales
+        enr_resp = (
+            await db.schema("journeys").table("enrollments")
+            .select(
+                "id, user_id, status, current_step_index, "
+                "progress_percentage, started_at, completed_at"
+            )
+            .eq("journey_id", journey_id)
+            .in_("user_id", member_user_ids)
+            .execute()
+        )
+        rows = enr_resp.data or []
+        if not rows:
+            return []
+        user_ids = [e["user_id"] for e in rows]
+        enrollments_by_user = {e["user_id"]: e for e in rows}
+
+    # 3. Profiles para los user_ids resultantes
     profiles_resp = (
         await db.table("profiles")
         .select("id, full_name, email")
@@ -694,19 +765,48 @@ async def list_journey_enrollees(
     )
     profiles_by_id = {p["id"]: p for p in (profiles_resp.data or [])}
 
-    # 4. Merge enrollment + profile
+    # 4. Merge: por cada user, computar funnel state
     out: list[dict] = []
-    for e in enrollments:
-        p = profiles_by_id.get(e["user_id"], {})
+    for user_id in user_ids:
+        e = enrollments_by_user.get(user_id)
+        p = profiles_by_id.get(user_id, {})
+
+        if e is None:
+            funnel_status = "not_started"
+            enrollment_id = None
+            progress = 0.0
+            current_step = 0
+            started_at = registered_at_by_user.get(user_id)
+            completed_at = None
+        else:
+            raw = e.get("status")
+            funnel_status = (
+                "completed" if raw == "completed"
+                else "active" if raw == "active"
+                else "not_started"
+            )
+            enrollment_id = e["id"]
+            progress = e.get("progress_percentage") or 0.0
+            current_step = e.get("current_step_index") or 0
+            started_at = e.get("started_at")
+            completed_at = e.get("completed_at")
+
+        if status is not None and funnel_status != status:
+            continue
+
         out.append({
-            "user_id": e["user_id"],
-            "enrollment_id": e["id"],
+            "user_id": user_id,
+            "enrollment_id": enrollment_id,
             "full_name": p.get("full_name"),
             "email": p.get("email"),
-            "status": e["status"],
-            "progress_percentage": e.get("progress_percentage", 0.0),
-            "current_step_index": e.get("current_step_index", 0),
-            "started_at": e["started_at"],
-            "completed_at": e.get("completed_at"),
+            "status": funnel_status,
+            "progress_percentage": progress,
+            "current_step_index": current_step,
+            "started_at": started_at,
+            "completed_at": completed_at,
         })
+
+    # Sort: completed > active > not_started; dentro del bucket por progress desc
+    rank = {"completed": 0, "active": 1, "not_started": 2}
+    out.sort(key=lambda r: (rank.get(r["status"], 3), -(r["progress_percentage"] or 0.0)))
     return out

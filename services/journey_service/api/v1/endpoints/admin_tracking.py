@@ -41,7 +41,7 @@ async def list_journey_enrollees_endpoint(
     org_id: str,
     journey_id: str,
     event_id: str | None = Query(None),
-    status: Literal["active", "completed", "pending", "dropped"] | None = Query(None),
+    status: Literal["not_started", "active", "completed"] | None = Query(None),
     _ctx=Depends(AdminRequired),  # noqa: B008
     db: AsyncClient = Depends(get_admin_client),  # noqa: B008
 ):

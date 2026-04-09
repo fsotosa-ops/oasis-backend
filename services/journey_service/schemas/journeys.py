@@ -236,9 +236,12 @@ class JourneyTrackingRead(BaseModel):
     category: str | None = None
     is_active: bool
     total_steps: int = 0
+    # Nueva semántica: total = asistentes del evento (registered/attended).
+    # active/completed = cruce con journeys.enrollments. not_started = el resto.
     total_enrollments: int = 0
     active_enrollments: int = 0
     completed_enrollments: int = 0
+    not_started_enrollments: int = 0
     completion_rate: float = 0.0  # decimal 0-1
 
     class Config:
@@ -269,17 +272,21 @@ class OrgTrackingResponse(BaseModel):
 
 
 class JourneyEnrolleeRead(BaseModel):
-    """Inscrito de un journey con la info de perfil necesaria para el drilldown
-    desde el tab Journeys del CRM dialog."""
+    """Usuario asociado a un journey en el contexto de un evento, con el estado
+    del funnel computado por list_journey_enrollees.
+
+    enrollment_id es None cuando el usuario asistió al evento pero nunca creó
+    una enrollment row (status='not_started'). started_at en ese caso cae al
+    registered_at de la asistencia."""
 
     user_id: UUID4
-    enrollment_id: UUID4
+    enrollment_id: UUID4 | None = None
     full_name: str | None = None
     email: str | None = None
-    status: str  # journeys.enrollment_status: 'active' | 'completed' | 'pending' | 'dropped'
+    status: str  # 'not_started' | 'active' | 'completed' (lectura del funnel)
     progress_percentage: float = 0.0
     current_step_index: int = 0
-    started_at: datetime
+    started_at: datetime | None = None
     completed_at: datetime | None = None
 
     class Config:
