@@ -391,16 +391,15 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
     Devuelve la jerarquía Org → Eventos → Journeys con stats por (event_id, journey_id).
 
     NUEVA SEMÁNTICA (cambio de modelo del funnel):
-    - La base de "inscritos" en cada (event, journey) son los **asistentes activos**
+    - La base de "inscritos" en cada (event, journey) son **todos los asistentes**
       del evento (filas en crm.event_attendances con status registered/attended),
-      NO las filas explícitas en journeys.enrollments.
+      independientemente de su membresía en la org. Lo que cuenta es que asistieron.
     - El estado del funnel por usuario se determina cruzando con journeys.enrollments:
         completed   → enrollment.status='completed'
         active      → enrollment.status='active'
         not_started → sin enrollment, o enrollment con status pending/dropped
     - Los enrollments con event_id NULL quedan fuera del scope jerárquico (siguen
-      en `unassigned_journeys` con la lógica legacy).
-    - Los asistentes se filtran adicionalmente a miembros activos de la org.
+      en `unassigned_journeys` con la lógica legacy, ahí sí scoped a miembros activos).
     """
     # 0. Miembros activos de la org (para scoping y para el header del UI)
     members_resp = (
@@ -463,31 +462,31 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
         for s in steps_resp.data or []:
             step_counts[s["journey_id"]] = step_counts.get(s["journey_id"], 0) + 1
 
-        # 5. Asistentes a los eventos (la nueva base del funnel — registered/attended)
-        if member_user_ids:
-            att_resp = (
-                await db.schema("crm").table("event_attendances")
-                .select("event_id, user_id, status")
-                .in_("event_id", event_ids)
-                .in_("user_id", member_user_ids)
-                .in_("status", ["registered", "attended"])
-                .execute()
-            )
-            attendances_rows = att_resp.data or []
+        # 5. Asistentes a los eventos (la nueva base del funnel — registered/attended).
+        # Sin filtro de membresía: lo que cuenta es la asistencia, no el rol en la org.
+        att_resp = (
+            await db.schema("crm").table("event_attendances")
+            .select("event_id, user_id, status")
+            .in_("event_id", event_ids)
+            .in_("status", ["registered", "attended"])
+            .execute()
+        )
+        attendances_rows = att_resp.data or []
 
-            # 6. Enrollments existentes (sólo para clasificar el estado del funnel)
-            enr_resp = (
-                await db.schema("journeys").table("enrollments")
-                .select("journey_id, event_id, status, user_id")
-                .in_("journey_id", journey_ids)
-                .in_("event_id", event_ids)
-                .in_("user_id", member_user_ids)
-                .execute()
-            )
-            for row in enr_resp.data or []:
-                enrollments_by_key[
-                    (row["event_id"], row["journey_id"], row["user_id"])
-                ] = row["status"]
+        # 6. Enrollments existentes (sólo para clasificar el estado del funnel).
+        # Tampoco se filtra por miembros: si un asistente avanzó en el journey,
+        # cuenta independientemente de su rol actual en la org.
+        enr_resp = (
+            await db.schema("journeys").table("enrollments")
+            .select("journey_id, event_id, status, user_id")
+            .in_("journey_id", journey_ids)
+            .in_("event_id", event_ids)
+            .execute()
+        )
+        for row in enr_resp.data or []:
+            enrollments_by_key[
+                (row["event_id"], row["journey_id"], row["user_id"])
+            ] = row["status"]
 
     # Mapa evento → journeys asignadas
     event_journey_map: dict[str, list[str]] = {}
@@ -680,8 +679,8 @@ async def list_journey_enrollees(
     Devuelve la lista de usuarios asociados a un journey en el contexto de un evento.
 
     NUEVA SEMÁNTICA (consistente con list_org_tracking):
-    - La base son los **asistentes del evento** (registered/attended) ∩ miembros
-      activos de la org. NO las filas de journeys.enrollments.
+    - La base son **todos los asistentes del evento** (registered/attended), sin
+      filtrar por membresía. Lo que cuenta es la asistencia, no el rol en la org.
     - El estado del funnel se determina cruzando con journeys.enrollments en
       (journey_id, event_id, user_id):
         completed   → enrollment.status='completed'
@@ -692,29 +691,16 @@ async def list_journey_enrollees(
     - El parámetro `status` filtra el resultado: 'not_started' | 'active' |
       'completed' | None (todos).
     """
-    # 1. Miembros activos de la org
-    members_resp = (
-        await db.table("organization_members")
-        .select("user_id")
-        .eq("organization_id", org_id)
-        .eq("status", "active")
-        .execute()
-    )
-    member_user_ids = [row["user_id"] for row in (members_resp.data or [])]
-    if not member_user_ids:
-        return []
-
     user_ids: list[str]
     enrollments_by_user: dict[str, dict] = {}
     registered_at_by_user: dict[str, str] = {}
 
     if event_id is not None:
-        # 2a. Caso event_id presente: base = asistentes del evento
+        # 2a. Caso event_id presente: base = todos los asistentes del evento
         att_resp = (
             await db.schema("crm").table("event_attendances")
             .select("user_id, registered_at")
             .eq("event_id", event_id)
-            .in_("user_id", member_user_ids)
             .in_("status", ["registered", "attended"])
             .execute()
         )
@@ -740,6 +726,18 @@ async def list_journey_enrollees(
         enrollments_by_user = {e["user_id"]: e for e in (enr_resp.data or [])}
     else:
         # 2b. Caso unassigned (event_id=None): lógica legacy — base = enrollments reales
+        # filtrados a miembros activos (no hay evento que sirva de base).
+        members_resp = (
+            await db.table("organization_members")
+            .select("user_id")
+            .eq("organization_id", org_id)
+            .eq("status", "active")
+            .execute()
+        )
+        member_user_ids = [row["user_id"] for row in (members_resp.data or [])]
+        if not member_user_ids:
+            return []
+
         enr_resp = (
             await db.schema("journeys").table("enrollments")
             .select(
