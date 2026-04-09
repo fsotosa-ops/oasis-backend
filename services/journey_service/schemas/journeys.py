@@ -268,6 +268,24 @@ class OrgTrackingResponse(BaseModel):
     unassigned_journeys: list[JourneyTrackingRead] = Field(default_factory=list)
 
 
+class JourneyEnrolleeRead(BaseModel):
+    """Inscrito de un journey con la info de perfil necesaria para el drilldown
+    desde el tab Journeys del CRM dialog."""
+
+    user_id: UUID4
+    enrollment_id: UUID4
+    full_name: str | None = None
+    email: str | None = None
+    status: str  # journeys.enrollment_status: 'active' | 'completed' | 'pending' | 'dropped'
+    progress_percentage: float = 0.0
+    current_step_index: int = 0
+    started_at: datetime
+    completed_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
 # ---------------------------------------------------------------------------
 # Journey Organization (multi-org assignment) schemas
 # ---------------------------------------------------------------------------

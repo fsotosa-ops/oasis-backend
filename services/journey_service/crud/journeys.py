@@ -630,3 +630,83 @@ async def archive_journey(db: AsyncClient, journey_id: UUID) -> dict:
         .execute()
     )
     return response.data[0] if response.data else {}
+
+
+async def list_journey_enrollees(
+    db: AsyncClient,
+    org_id: str,
+    journey_id: str,
+    event_id: str | None = None,
+    status: str | None = None,
+) -> list[dict]:
+    """
+    Devuelve la lista de inscritos en un journey, filtrada al scope de la org.
+
+    Usado por el drilldown del tab Journeys del CRM dialog (click en celdas
+    "Inscritos" / "Completados").
+
+    - Sólo incluye usuarios que son miembros activos de la org dada.
+    - Si event_id se pasa, filtra a enrollments de ese evento.
+    - Si status se pasa ('active' | 'completed' | 'pending' | 'dropped'),
+      filtra por estado.
+    - Hace dos queries (enrollments en schema 'journeys' + profiles en schema
+      'public') y mergea en Python para evitar joins cross-schema en PostgREST.
+    """
+    # 1. Miembros activos de la org (mismo scoping que list_org_tracking)
+    members_resp = (
+        await db.table("organization_members")
+        .select("user_id")
+        .eq("organization_id", org_id)
+        .eq("status", "active")
+        .execute()
+    )
+    member_user_ids = [row["user_id"] for row in (members_resp.data or [])]
+    if not member_user_ids:
+        return []
+
+    # 2. Enrollments del journey, filtrados a miembros activos
+    q = (
+        db.schema("journeys").table("enrollments")
+        .select(
+            "id, user_id, status, current_step_index, "
+            "progress_percentage, started_at, completed_at"
+        )
+        .eq("journey_id", journey_id)
+        .in_("user_id", member_user_ids)
+    )
+    if event_id is not None:
+        q = q.eq("event_id", event_id)
+    if status is not None:
+        q = q.eq("status", status)
+
+    enr_resp = await q.order("started_at", desc=True).execute()
+    enrollments = enr_resp.data or []
+    if not enrollments:
+        return []
+
+    # 3. Perfiles para los user_ids encontrados
+    user_ids = list({e["user_id"] for e in enrollments})
+    profiles_resp = (
+        await db.table("profiles")
+        .select("id, full_name, email")
+        .in_("id", user_ids)
+        .execute()
+    )
+    profiles_by_id = {p["id"]: p for p in (profiles_resp.data or [])}
+
+    # 4. Merge enrollment + profile
+    out: list[dict] = []
+    for e in enrollments:
+        p = profiles_by_id.get(e["user_id"], {})
+        out.append({
+            "user_id": e["user_id"],
+            "enrollment_id": e["id"],
+            "full_name": p.get("full_name"),
+            "email": p.get("email"),
+            "status": e["status"],
+            "progress_percentage": e.get("progress_percentage", 0.0),
+            "current_step_index": e.get("current_step_index", 0),
+            "started_at": e["started_at"],
+            "completed_at": e.get("completed_at"),
+        })
+    return out
