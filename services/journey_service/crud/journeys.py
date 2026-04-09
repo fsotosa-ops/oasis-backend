@@ -396,7 +396,20 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
       event_id NULL quedan excluidos a propósito (no pertenecen a un evento del
       tracking jerárquico).
     - completion_rate se devuelve como decimal 0-1 (consistente con el resto del backend).
+    - Los enrollments se filtran adicionalmente a los miembros activos de la org para
+      que las cifras reflejen solo a los usuarios actualmente vinculados.
     """
+    # 0. Miembros activos de la org (para scoping y para el header del UI)
+    members_resp = (
+        await db.table("organization_members")
+        .select("user_id")
+        .eq("organization_id", org_id)
+        .eq("status", "active")
+        .execute()
+    )
+    member_user_ids = [row["user_id"] for row in (members_resp.data or [])]
+    total_members = len(member_user_ids)
+
     # 1. Eventos de la org
     events_resp = (
         await db.schema("crm").table("org_events")
@@ -406,24 +419,24 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
         .execute()
     )
     events = events_resp.data or []
-    if not events:
-        return {"organization_id": org_id, "events": []}
-
     event_ids = [e["id"] for e in events]
 
-    # 2. Asignaciones evento ↔ journey
-    ej_resp = (
-        await db.schema("crm").table("event_journeys")
-        .select("event_id, journey_id")
-        .in_("event_id", event_ids)
-        .execute()
-    )
-    ej_rows = ej_resp.data or []
-    journey_ids = list({row["journey_id"] for row in ej_rows})
-
+    ej_rows: list[dict] = []
+    journey_ids: list[str] = []
     journeys_meta: dict[str, dict] = {}
     step_counts: dict[str, int] = {}
     enrollments_rows: list[dict] = []
+
+    if event_ids:
+        # 2. Asignaciones evento ↔ journey
+        ej_resp = (
+            await db.schema("crm").table("event_journeys")
+            .select("event_id, journey_id")
+            .in_("event_id", event_ids)
+            .execute()
+        )
+        ej_rows = ej_resp.data or []
+        journey_ids = list({row["journey_id"] for row in ej_rows})
 
     if journey_ids:
         # 3. Metadata de journeys
@@ -446,15 +459,17 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
         for s in steps_resp.data or []:
             step_counts[s["journey_id"]] = step_counts.get(s["journey_id"], 0) + 1
 
-        # 5. Enrollments scoped a (journey_id, event_id)
-        enr_resp = (
-            await db.schema("journeys").table("enrollments")
-            .select("journey_id, event_id, status")
-            .in_("journey_id", journey_ids)
-            .in_("event_id", event_ids)
-            .execute()
-        )
-        enrollments_rows = enr_resp.data or []
+        # 5. Enrollments scoped a (journey_id, event_id) y a miembros activos
+        if member_user_ids:
+            enr_resp = (
+                await db.schema("journeys").table("enrollments")
+                .select("journey_id, event_id, status, user_id")
+                .in_("journey_id", journey_ids)
+                .in_("event_id", event_ids)
+                .in_("user_id", member_user_ids)
+                .execute()
+            )
+            enrollments_rows = enr_resp.data or []
 
     # Bucket de stats por (event_id, journey_id)
     stats: dict[tuple[str, str], dict[str, int]] = {}
@@ -510,7 +525,91 @@ async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
             "journeys": tracked_journeys,
         })
 
-    return {"organization_id": org_id, "events": out_events}
+    # 6. Journeys asignados a la org pero no a ningún evento (no aparecerían en
+    # la vista jerárquica). Se cuentan también scoped a miembros activos.
+    all_assigned_resp = (
+        await db.schema("journeys").table("journey_organizations")
+        .select("journey_id")
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    all_assigned_ids = {row["journey_id"] for row in (all_assigned_resp.data or [])}
+    unassigned_ids = list(all_assigned_ids - set(journey_ids))
+
+    unassigned_journeys: list[dict] = []
+    unassigned_enrollments_rows: list[dict] = []
+    if unassigned_ids:
+        um_resp = (
+            await db.schema("journeys").table("journeys")
+            .select("id, title, slug, category, is_active")
+            .in_("id", unassigned_ids)
+            .execute()
+        )
+        us_resp = (
+            await db.schema("journeys").table("steps")
+            .select("journey_id")
+            .in_("journey_id", unassigned_ids)
+            .execute()
+        )
+        if member_user_ids:
+            ue_resp = (
+                await db.schema("journeys").table("enrollments")
+                .select("journey_id, status, user_id")
+                .in_("journey_id", unassigned_ids)
+                .in_("user_id", member_user_ids)
+                .execute()
+            )
+            unassigned_enrollments_rows = ue_resp.data or []
+
+        u_step_counts: dict[str, int] = {}
+        for s in us_resp.data or []:
+            u_step_counts[s["journey_id"]] = u_step_counts.get(s["journey_id"], 0) + 1
+
+        u_stats: dict[str, dict[str, int]] = {}
+        for row in unassigned_enrollments_rows:
+            b = u_stats.setdefault(
+                row["journey_id"], {"total": 0, "active": 0, "completed": 0}
+            )
+            b["total"] += 1
+            if row["status"] == "active":
+                b["active"] += 1
+            elif row["status"] == "completed":
+                b["completed"] += 1
+
+        for j in um_resp.data or []:
+            b = u_stats.get(j["id"], {"total": 0, "active": 0, "completed": 0})
+            t = b["total"]
+            unassigned_journeys.append({
+                "id": j["id"],
+                "title": j["title"],
+                "slug": j["slug"],
+                "category": j.get("category"),
+                "is_active": j.get("is_active", False),
+                "total_steps": u_step_counts.get(j["id"], 0),
+                "total_enrollments": t,
+                "active_enrollments": b["active"],
+                "completed_enrollments": b["completed"],
+                "completion_rate": round(b["completed"] / t, 4) if t > 0 else 0.0,
+            })
+
+    # 7. Totales agregados (filas vs usuarios únicos)
+    unique_users: set[str] = set()
+    total_enrollments_count = 0
+    for row in enrollments_rows:
+        unique_users.add(row["user_id"])
+        total_enrollments_count += 1
+    for row in unassigned_enrollments_rows:
+        unique_users.add(row["user_id"])
+        total_enrollments_count += 1
+
+    return {
+        "organization_id": org_id,
+        "events": out_events,
+        "total_members": total_members,
+        "total_unique_enrolled_users": len(unique_users),
+        "total_enrollments": total_enrollments_count,
+        "unassigned_journeys": unassigned_journeys,
+    }
 
 
 async def publish_journey(db: AsyncClient, journey_id: UUID) -> dict:

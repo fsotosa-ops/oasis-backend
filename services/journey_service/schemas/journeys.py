@@ -262,6 +262,10 @@ class EventTrackingRead(BaseModel):
 class OrgTrackingResponse(BaseModel):
     organization_id: UUID4
     events: list[EventTrackingRead] = Field(default_factory=list)
+    total_members: int = 0
+    total_unique_enrolled_users: int = 0
+    total_enrollments: int = 0
+    unassigned_journeys: list[JourneyTrackingRead] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
