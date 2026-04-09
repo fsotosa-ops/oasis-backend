@@ -334,6 +334,19 @@ async def list_journeys_admin(
     journeys = response.data or []
     total = response.count or 0
 
+    # Scope enrollment counts to users that belong to this org so that the
+    # numbers shown in the UI ("Inscritos" / "Completados") reflect the org
+    # being viewed instead of the journey's global reach across all orgs it
+    # is assigned to.
+    members_resp = (
+        await db.table("organization_members")
+        .select("user_id")
+        .eq("organization_id", org_id)
+        .eq("status", "active")
+        .execute()
+    )
+    member_user_ids = [row["user_id"] for row in (members_resp.data or [])]
+
     for journey in journeys:
         steps_resp = (
             await db.schema("journeys").table("steps")
@@ -343,13 +356,18 @@ async def list_journeys_admin(
         )
         journey["total_steps"] = steps_resp.count or 0
 
-        enroll_resp = (
-            await db.schema("journeys").table("enrollments")
-            .select("status")
-            .eq("journey_id", journey["id"])
-            .execute()
-        )
-        enrollments = enroll_resp.data or []
+        if member_user_ids:
+            enroll_resp = (
+                await db.schema("journeys").table("enrollments")
+                .select("status")
+                .eq("journey_id", journey["id"])
+                .in_("user_id", member_user_ids)
+                .execute()
+            )
+            enrollments = enroll_resp.data or []
+        else:
+            enrollments = []
+
         journey["total_enrollments"] = len(enrollments)
         journey["active_enrollments"] = sum(
             1 for e in enrollments if e["status"] == "active"
