@@ -227,6 +227,44 @@ class JourneyAdminRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tracking jerárquico Org → Evento → Journeys
+# ---------------------------------------------------------------------------
+class JourneyTrackingRead(BaseModel):
+    id: UUID4
+    title: str
+    slug: str
+    category: str | None = None
+    is_active: bool
+    total_steps: int = 0
+    total_enrollments: int = 0
+    active_enrollments: int = 0
+    completed_enrollments: int = 0
+    completion_rate: float = 0.0  # decimal 0-1
+
+    class Config:
+        from_attributes = True
+
+
+class EventTrackingRead(BaseModel):
+    event_id: UUID4
+    event_name: str
+    event_slug: str
+    event_status: str
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    location: str | None = None
+    journeys: list[JourneyTrackingRead] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+class OrgTrackingResponse(BaseModel):
+    organization_id: UUID4
+    events: list[EventTrackingRead] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Journey Organization (multi-org assignment) schemas
 # ---------------------------------------------------------------------------
 class JourneyOrganizationAssign(BaseModel):

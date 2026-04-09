@@ -289,7 +289,7 @@ async def get_journey_admin(db: AsyncClient, journey_id: UUID) -> dict | None:
 
     if journey["total_enrollments"] > 0:
         journey["completion_rate"] = round(
-            (journey["completed_enrollments"] / journey["total_enrollments"]) * 100, 2
+            journey["completed_enrollments"] / journey["total_enrollments"], 4
         )
     else:
         journey["completion_rate"] = 0.0
@@ -357,8 +357,142 @@ async def list_journeys_admin(
         journey["completed_enrollments"] = sum(
             1 for e in enrollments if e["status"] == "completed"
         )
+        journey["completion_rate"] = (
+            round(
+                journey["completed_enrollments"] / journey["total_enrollments"], 4
+            )
+            if journey["total_enrollments"] > 0
+            else 0.0
+        )
 
     return journeys, total
+
+
+async def list_org_tracking(db: AsyncClient, org_id: str) -> dict:
+    """
+    Devuelve la jerarquía Org → Eventos → Journeys con stats por (event_id, journey_id).
+
+    - Lee eventos desde crm.org_events para la org dada.
+    - Resuelve la asignación de journeys via crm.event_journeys.
+    - Cuenta enrollments scoped por (journey_id, event_id) — los enrollments con
+      event_id NULL quedan excluidos a propósito (no pertenecen a un evento del
+      tracking jerárquico).
+    - completion_rate se devuelve como decimal 0-1 (consistente con el resto del backend).
+    """
+    # 1. Eventos de la org
+    events_resp = (
+        await db.schema("crm").table("org_events")
+        .select("id, name, slug, status, start_date, end_date, location")
+        .eq("organization_id", org_id)
+        .order("start_date", desc=True)
+        .execute()
+    )
+    events = events_resp.data or []
+    if not events:
+        return {"organization_id": org_id, "events": []}
+
+    event_ids = [e["id"] for e in events]
+
+    # 2. Asignaciones evento ↔ journey
+    ej_resp = (
+        await db.schema("crm").table("event_journeys")
+        .select("event_id, journey_id")
+        .in_("event_id", event_ids)
+        .execute()
+    )
+    ej_rows = ej_resp.data or []
+    journey_ids = list({row["journey_id"] for row in ej_rows})
+
+    journeys_meta: dict[str, dict] = {}
+    step_counts: dict[str, int] = {}
+    enrollments_rows: list[dict] = []
+
+    if journey_ids:
+        # 3. Metadata de journeys
+        jm_resp = (
+            await db.schema("journeys").table("journeys")
+            .select("id, title, slug, category, is_active")
+            .in_("id", journey_ids)
+            .execute()
+        )
+        for j in jm_resp.data or []:
+            journeys_meta[j["id"]] = j
+
+        # 4. Conteo de steps por journey
+        steps_resp = (
+            await db.schema("journeys").table("steps")
+            .select("journey_id")
+            .in_("journey_id", journey_ids)
+            .execute()
+        )
+        for s in steps_resp.data or []:
+            step_counts[s["journey_id"]] = step_counts.get(s["journey_id"], 0) + 1
+
+        # 5. Enrollments scoped a (journey_id, event_id)
+        enr_resp = (
+            await db.schema("journeys").table("enrollments")
+            .select("journey_id, event_id, status")
+            .in_("journey_id", journey_ids)
+            .in_("event_id", event_ids)
+            .execute()
+        )
+        enrollments_rows = enr_resp.data or []
+
+    # Bucket de stats por (event_id, journey_id)
+    stats: dict[tuple[str, str], dict[str, int]] = {}
+    for row in enrollments_rows:
+        key = (row["event_id"], row["journey_id"])
+        bucket = stats.setdefault(key, {"total": 0, "active": 0, "completed": 0})
+        bucket["total"] += 1
+        if row["status"] == "active":
+            bucket["active"] += 1
+        elif row["status"] == "completed":
+            bucket["completed"] += 1
+
+    # Mapa evento → journeys asignadas
+    event_journey_map: dict[str, list[str]] = {}
+    for row in ej_rows:
+        event_journey_map.setdefault(row["event_id"], []).append(row["journey_id"])
+
+    # Ensamblar respuesta
+    out_events: list[dict] = []
+    for ev in events:
+        ev_id = ev["id"]
+        tracked_journeys: list[dict] = []
+        for j_id in event_journey_map.get(ev_id, []):
+            meta = journeys_meta.get(j_id)
+            if not meta:
+                continue
+            bucket = stats.get(
+                (ev_id, j_id), {"total": 0, "active": 0, "completed": 0}
+            )
+            total = bucket["total"]
+            tracked_journeys.append({
+                "id": meta["id"],
+                "title": meta["title"],
+                "slug": meta["slug"],
+                "category": meta.get("category"),
+                "is_active": meta.get("is_active", False),
+                "total_steps": step_counts.get(j_id, 0),
+                "total_enrollments": total,
+                "active_enrollments": bucket["active"],
+                "completed_enrollments": bucket["completed"],
+                "completion_rate": (
+                    round(bucket["completed"] / total, 4) if total > 0 else 0.0
+                ),
+            })
+        out_events.append({
+            "event_id": ev_id,
+            "event_name": ev["name"],
+            "event_slug": ev["slug"],
+            "event_status": ev["status"],
+            "start_date": ev.get("start_date"),
+            "end_date": ev.get("end_date"),
+            "location": ev.get("location"),
+            "journeys": tracked_journeys,
+        })
+
+    return {"organization_id": org_id, "events": out_events}
 
 
 async def publish_journey(db: AsyncClient, journey_id: UUID) -> dict:
