@@ -308,17 +308,17 @@ class JourneyEnrolleeRead(BaseModel):
 
 class EventEnrolleeRead(BaseModel):
     """Enrollee deduplicado a nivel de evento.
-    journeys = títulos separados por coma.
-    progress/status = el del journey con mayor progreso."""
+    Campos por journey se concatenan con coma en el mismo orden que journeys.
+    Ej: journeys="Taller A, Taller B", status="Completado, En progreso"."""
 
     user_id: UUID4
     full_name: str | None = None
     email: str | None = None
     journeys: str = ""
-    status: str = "not_started"
-    progress_percentage: float = 0.0
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    status: str = ""           # "Completado, En progreso"
+    progress_percentage: str = ""  # "100, 60"
+    started_at: str = ""       # "2024-01-15, 2024-02-01"
+    completed_at: str = ""     # "2024-03-01, -"
 
     # CRM contact data
     first_name: str | None = None

@@ -891,54 +891,76 @@ async def list_event_enrollees(
         for r in rows:
             all_rows.append((jtitle, r))
 
-    # 3. Deduplicar por user_id: journeys como CSV, mejor status/progreso
-    status_rank = {"completed": 2, "active": 1, "not_started": 0}
+    # 3. Agrupar por user_id: acumular datos por journey
+    status_labels = {"completed": "Completado", "active": "En progreso", "not_started": "No iniciado"}
     user_map: dict[str, dict] = {}
 
     for jtitle, row in all_rows:
         uid = row["user_id"]
+        pct = int(row.get("progress_percentage") or 0)
+        st = row.get("status", "not_started")
+        started = (row.get("started_at") or "")[:10] if row.get("started_at") else ""
+        completed = (row.get("completed_at") or "")[:10] if row.get("completed_at") else ""
+
         if uid not in user_map:
+            # Copiar datos base del usuario (profile + CRM) del primer row
             user_map[uid] = {
-                **row,
+                "user_id": uid,
+                "full_name": row.get("full_name"),
+                "email": row.get("email"),
+                "first_name": row.get("first_name"),
+                "last_name": row.get("last_name"),
+                "phone": row.get("phone"),
+                "company": row.get("company"),
+                "country": row.get("country"),
+                "state": row.get("state"),
+                "city": row.get("city"),
+                "birth_date": row.get("birth_date"),
+                "gender": row.get("gender"),
+                "education_level": row.get("education_level"),
+                "occupation": row.get("occupation"),
+                # Listas para concatenar por journey
                 "_journeys": [jtitle],
-                "_rank": status_rank.get(row["status"], 0),
+                "_statuses": [status_labels.get(st, st)],
+                "_progresses": [str(pct)],
+                "_started": [started],
+                "_completed": [completed],
             }
         else:
             existing = user_map[uid]
             existing["_journeys"].append(jtitle)
-            new_rank = status_rank.get(row["status"], 0)
-            if new_rank > existing["_rank"]:
-                existing["status"] = row["status"]
-                existing["_rank"] = new_rank
-            if (row["progress_percentage"] or 0) > (
-                existing["progress_percentage"] or 0
-            ):
-                existing["progress_percentage"] = row["progress_percentage"]
-            if row["completed_at"] and not existing["completed_at"]:
-                existing["completed_at"] = row["completed_at"]
-            if row["started_at"]:
-                if (
-                    not existing["started_at"]
-                    or row["started_at"] < existing["started_at"]
-                ):
-                    existing["started_at"] = row["started_at"]
+            existing["_statuses"].append(status_labels.get(st, st))
+            existing["_progresses"].append(str(pct))
+            existing["_started"].append(started)
+            existing["_completed"].append(completed)
 
-    # 4. Formatear salida
+    # 4. Formatear salida — concatenar valores por journey
+    status_rank = {"Completado": 0, "En progreso": 1, "No iniciado": 2}
     out: list[dict] = []
     for u in user_map.values():
         u["journeys"] = ", ".join(dict.fromkeys(u.pop("_journeys")))
-        u.pop("_rank", None)
-        u.pop("enrollment_id", None)
-        u.pop("current_step_index", None)
-        if status and u["status"] != status:
-            continue
+        statuses = u.pop("_statuses")
+        progresses = u.pop("_progresses")
+        started_list = u.pop("_started")
+        completed_list = u.pop("_completed")
+
+        u["status"] = ", ".join(statuses)
+        u["progress_percentage"] = ", ".join(progresses)
+        u["started_at"] = ", ".join(s or "-" for s in started_list)
+        u["completed_at"] = ", ".join(s or "-" for s in completed_list)
+
+        # Filtro por status si se pidió
+        if status:
+            status_label = status_labels.get(status, status)
+            if status_label not in statuses:
+                continue
+
+        # Ordenar por mejor status del usuario
+        best_rank = min(status_rank.get(s, 3) for s in statuses)
+        best_pct = max(int(p) for p in progresses)
+        u["_sort"] = (best_rank, -best_pct)
+
         out.append(u)
 
-    rank_map = {"completed": 0, "active": 1, "not_started": 2}
-    out.sort(
-        key=lambda r: (
-            rank_map.get(r["status"], 3),
-            -(r["progress_percentage"] or 0.0),
-        )
-    )
+    out.sort(key=lambda r: r.pop("_sort"))
     return out
