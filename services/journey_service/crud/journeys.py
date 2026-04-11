@@ -835,3 +835,110 @@ async def list_journey_enrollees(
     rank = {"completed": 0, "active": 1, "not_started": 2}
     out.sort(key=lambda r: (rank.get(r["status"], 3), -(r["progress_percentage"] or 0.0)))
     return out
+
+
+async def list_event_enrollees(
+    db: AsyncClient,
+    org_id: str,
+    event_id: str,
+    status: str | None = None,
+) -> list[dict]:
+    """Enrollees deduplicados por usuario para TODOS los journeys de un evento.
+
+    Un usuario en múltiples journeys → 1 fila con journeys concatenados
+    y el mejor status/progreso. Compatible con gestores de campañas
+    (Brevo, Mailchimp) que requieren 1 fila por contacto.
+    """
+    # 1. Journeys asignados al evento Y a la org
+    jo_resp = (
+        await db.schema("journeys").table("journey_organizations")
+        .select("journey_id")
+        .eq("organization_id", org_id)
+        .execute()
+    )
+    org_journey_ids = {r["journey_id"] for r in (jo_resp.data or [])}
+
+    ev_resp = (
+        await db.schema("journeys").table("event_journeys")
+        .select("journey_id")
+        .eq("event_id", event_id)
+        .execute()
+    )
+    event_journey_ids = [
+        r["journey_id"]
+        for r in (ev_resp.data or [])
+        if r["journey_id"] in org_journey_ids
+    ]
+    if not event_journey_ids:
+        return []
+
+    # Títulos
+    j_resp = (
+        await db.schema("journeys").table("journeys")
+        .select("id, title")
+        .in_("id", event_journey_ids)
+        .execute()
+    )
+    title_by_id = {j["id"]: j["title"] for j in (j_resp.data or [])}
+
+    # 2. Enrollees por journey (reutiliza función existente)
+    all_rows: list[tuple[str, dict]] = []
+    for jid in event_journey_ids:
+        rows = await list_journey_enrollees(
+            db, org_id, jid, event_id=event_id, status=None,
+        )
+        jtitle = title_by_id.get(jid, "")
+        for r in rows:
+            all_rows.append((jtitle, r))
+
+    # 3. Deduplicar por user_id: journeys como CSV, mejor status/progreso
+    status_rank = {"completed": 2, "active": 1, "not_started": 0}
+    user_map: dict[str, dict] = {}
+
+    for jtitle, row in all_rows:
+        uid = row["user_id"]
+        if uid not in user_map:
+            user_map[uid] = {
+                **row,
+                "_journeys": [jtitle],
+                "_rank": status_rank.get(row["status"], 0),
+            }
+        else:
+            existing = user_map[uid]
+            existing["_journeys"].append(jtitle)
+            new_rank = status_rank.get(row["status"], 0)
+            if new_rank > existing["_rank"]:
+                existing["status"] = row["status"]
+                existing["_rank"] = new_rank
+            if (row["progress_percentage"] or 0) > (
+                existing["progress_percentage"] or 0
+            ):
+                existing["progress_percentage"] = row["progress_percentage"]
+            if row["completed_at"] and not existing["completed_at"]:
+                existing["completed_at"] = row["completed_at"]
+            if row["started_at"]:
+                if (
+                    not existing["started_at"]
+                    or row["started_at"] < existing["started_at"]
+                ):
+                    existing["started_at"] = row["started_at"]
+
+    # 4. Formatear salida
+    out: list[dict] = []
+    for u in user_map.values():
+        u["journeys"] = ", ".join(dict.fromkeys(u.pop("_journeys")))
+        u.pop("_rank", None)
+        u.pop("enrollment_id", None)
+        u.pop("current_step_index", None)
+        if status and u["status"] != status:
+            continue
+        out.append(u)
+
+    rank_map = {"completed": 0, "active": 1, "not_started": 2}
+    out.sort(
+        key=lambda r: (
+            rank_map.get(r["status"], 3),
+            -(r["progress_percentage"] or 0.0),
+        )
+    )
+    return out

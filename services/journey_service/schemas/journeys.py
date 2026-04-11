@@ -306,6 +306,37 @@ class JourneyEnrolleeRead(BaseModel):
         from_attributes = True
 
 
+class EventEnrolleeRead(BaseModel):
+    """Enrollee deduplicado a nivel de evento.
+    journeys = títulos separados por coma.
+    progress/status = el del journey con mayor progreso."""
+
+    user_id: UUID4
+    full_name: str | None = None
+    email: str | None = None
+    journeys: str = ""
+    status: str = "not_started"
+    progress_percentage: float = 0.0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    # CRM contact data
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    country: str | None = None
+    state: str | None = None
+    city: str | None = None
+    birth_date: date | None = None
+    gender: str | None = None
+    education_level: str | None = None
+    occupation: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
 # ---------------------------------------------------------------------------
 # Journey Organization (multi-org assignment) schemas
 # ---------------------------------------------------------------------------

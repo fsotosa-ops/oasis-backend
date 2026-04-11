@@ -7,6 +7,7 @@ from common.auth.security import OrgRoleRequired
 from common.database.client import get_admin_client
 from services.journey_service.crud import journeys as crud
 from services.journey_service.schemas.journeys import (
+    EventEnrolleeRead,
     JourneyEnrolleeRead,
     OrgTrackingResponse,
 )
@@ -51,4 +52,21 @@ async def list_journey_enrollees_endpoint(
         journey_id=journey_id,
         event_id=event_id,
         status=status,
+    )
+
+
+@router.get(
+    "/{org_id}/admin/tracking/events/{event_id}/enrollees",
+    response_model=list[EventEnrolleeRead],
+    summary="Enrollees deduplicados de todos los journeys de un evento",
+)
+async def list_event_enrollees_endpoint(
+    org_id: str,
+    event_id: str,
+    status: Literal["not_started", "active", "completed"] | None = Query(None),
+    _ctx=Depends(AdminRequired),  # noqa: B008
+    db: AsyncClient = Depends(get_admin_client),  # noqa: B008
+):
+    return await crud.list_event_enrollees(
+        db, org_id=org_id, event_id=event_id, status=status,
     )
