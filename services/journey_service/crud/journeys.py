@@ -763,6 +763,21 @@ async def list_journey_enrollees(
     )
     profiles_by_id = {p["id"]: p for p in (profiles_resp.data or [])}
 
+    # 3b. CRM contacts para datos enriquecidos
+    contacts_by_id: dict[str, dict] = {}
+    if user_ids:
+        crm_resp = (
+            await db.schema("crm").table("contacts")
+            .select(
+                "user_id, first_name, last_name, phone, company, "
+                "country, state, city, birth_date, gender, "
+                "education_level, occupation"
+            )
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        contacts_by_id = {c["user_id"]: c for c in (crm_resp.data or [])}
+
     # 4. Merge: por cada user, computar funnel state
     out: list[dict] = []
     for user_id in user_ids:
@@ -792,6 +807,7 @@ async def list_journey_enrollees(
         if status is not None and funnel_status != status:
             continue
 
+        c = contacts_by_id.get(user_id, {})
         out.append({
             "user_id": user_id,
             "enrollment_id": enrollment_id,
@@ -802,6 +818,17 @@ async def list_journey_enrollees(
             "current_step_index": current_step,
             "started_at": started_at,
             "completed_at": completed_at,
+            "first_name": c.get("first_name"),
+            "last_name": c.get("last_name"),
+            "phone": c.get("phone"),
+            "company": c.get("company"),
+            "country": c.get("country"),
+            "state": c.get("state"),
+            "city": c.get("city"),
+            "birth_date": c.get("birth_date"),
+            "gender": c.get("gender"),
+            "education_level": c.get("education_level"),
+            "occupation": c.get("occupation"),
         })
 
     # Sort: completed > active > not_started; dentro del bucket por progress desc

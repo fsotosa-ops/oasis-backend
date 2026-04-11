@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import UUID4, BaseModel, Field
@@ -288,6 +288,19 @@ class JourneyEnrolleeRead(BaseModel):
     current_step_index: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    # CRM contact data (siempre incluido desde crm.contacts)
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    country: str | None = None
+    state: str | None = None
+    city: str | None = None
+    birth_date: date | None = None
+    gender: str | None = None
+    education_level: str | None = None
+    occupation: str | None = None
 
     class Config:
         from_attributes = True
