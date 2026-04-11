@@ -859,7 +859,7 @@ async def list_event_enrollees(
     org_journey_ids = {r["journey_id"] for r in (jo_resp.data or [])}
 
     ev_resp = (
-        await db.schema("journeys").table("event_journeys")
+        await db.schema("crm").table("event_journeys")
         .select("journey_id")
         .eq("event_id", event_id)
         .execute()
