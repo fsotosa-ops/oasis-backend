@@ -39,15 +39,25 @@ async def get_journeys_for_org(
         .eq("organization_id", org_id)
         .execute()
     )
-    assigned_ids = [row["journey_id"] for row in (jo_response.data or [])]
+    assigned_ids = {row["journey_id"] for row in (jo_response.data or [])}
 
-    if not assigned_ids:
+    # Also include journeys flagged as global (visible to every org)
+    global_response = (
+        await db.schema("journeys")
+        .table("journeys")
+        .select("id")
+        .eq("is_global", True)
+        .execute()
+    )
+    union_ids = list(assigned_ids | {row["id"] for row in (global_response.data or [])})
+
+    if not union_ids:
         return [], 0
 
     query = (
         db.schema("journeys").table("journeys")
         .select("*", count="exact")
-        .in_("id", assigned_ids)
+        .in_("id", union_ids)
     )
 
     if is_active is not None:
@@ -144,7 +154,18 @@ async def verify_journey_accessible_by_org(
     journey_id: UUID,
     org_id: str,
 ) -> bool:
-    """Check if a journey is accessible by an org (owned OR assigned via junction table)."""
+    """Check if a journey is accessible by an org (owned, assigned via junction table, or global)."""
+    j_resp = (
+        await db.schema("journeys")
+        .table("journeys")
+        .select("is_global")
+        .eq("id", str(journey_id))
+        .maybe_single()
+        .execute()
+    )
+    if j_resp.data and j_resp.data.get("is_global"):
+        return True
+
     response = (
         await db.schema("journeys")
         .table("journey_organizations")
@@ -172,6 +193,7 @@ async def create_journey(
         "thumbnail_url": journey.thumbnail_url,
         "category": journey.category,
         "is_active": journey.is_active,
+        "is_global": journey.is_global,
         "metadata": journey.metadata,
     }
 
@@ -312,15 +334,25 @@ async def list_journeys_admin(
         .eq("organization_id", org_id)
         .execute()
     )
-    assigned_ids = [row["journey_id"] for row in (jo_response.data or [])]
+    assigned_ids = {row["journey_id"] for row in (jo_response.data or [])}
 
-    if not assigned_ids:
+    # Also include journeys flagged as global (visible to every org)
+    global_response = (
+        await db.schema("journeys")
+        .table("journeys")
+        .select("id")
+        .eq("is_global", True)
+        .execute()
+    )
+    union_ids = list(assigned_ids | {row["id"] for row in (global_response.data or [])})
+
+    if not union_ids:
         return [], 0
 
     query = (
         db.schema("journeys").table("journeys")
         .select("*", count="exact")
-        .in_("id", assigned_ids)
+        .in_("id", union_ids)
     )
 
     if is_active is not None:

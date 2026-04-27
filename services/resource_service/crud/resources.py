@@ -21,12 +21,12 @@ async def list_resources_admin(
     )
     assigned_ids = [r["resource_id"] for r in (ro_resp.data or [])]
 
-    # Build filter: owned by org OR assigned to org
+    # Build filter: owned by org OR assigned to org OR flagged as global
+    or_clauses = [f"organization_id.eq.{org_id}", "is_global.eq.true"]
     if assigned_ids:
         ids_csv = ",".join(assigned_ids)
-        or_filter = f"organization_id.eq.{org_id},id.in.({ids_csv})"
-    else:
-        or_filter = f"organization_id.eq.{org_id}"
+        or_clauses.append(f"id.in.({ids_csv})")
+    or_filter = ",".join(or_clauses)
 
     query = (
         db.schema("resources").table("resources")
@@ -99,6 +99,7 @@ async def create_resource(
         "thumbnail_url": payload.thumbnail_url,
         "points_on_completion": payload.points_on_completion,
         "unlock_logic": payload.unlock_logic,
+        "is_global": payload.is_global,
         "metadata": payload.metadata,
     }
     response = (
@@ -153,6 +154,8 @@ async def update_resource(
         update_data["points_on_completion"] = payload.points_on_completion
     if payload.unlock_logic is not None:
         update_data["unlock_logic"] = payload.unlock_logic
+    if payload.is_global is not None:
+        update_data["is_global"] = payload.is_global
     if payload.metadata is not None:
         update_data["metadata"] = payload.metadata
 
@@ -249,12 +252,12 @@ async def list_resources_for_user(
     )
     assigned_ids = list({r["resource_id"] for r in (ro_resp.data or [])})
 
-    # Build filter: owned by user's orgs OR assigned to user's orgs
+    # Build filter: owned by user's orgs OR assigned to user's orgs OR global
+    or_clauses = [f"organization_id.in.({org_filter})", "is_global.eq.true"]
     if assigned_ids:
         ids_csv = ",".join(assigned_ids)
-        or_filter = f"organization_id.in.({org_filter}),id.in.({ids_csv})"
-    else:
-        or_filter = f"organization_id.in.({org_filter})"
+        or_clauses.append(f"id.in.({ids_csv})")
+    or_filter = ",".join(or_clauses)
 
     response = (
         await db.schema("resources").table("resources")

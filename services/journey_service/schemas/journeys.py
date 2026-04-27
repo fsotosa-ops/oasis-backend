@@ -188,6 +188,7 @@ class JourneyCreate(BaseModel):
     thumbnail_url: str | None = None
     category: str | None = None
     is_active: bool = False
+    is_global: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -200,6 +201,7 @@ class JourneyUpdate(BaseModel):
     thumbnail_url: str | None = None
     category: str | None = None
     is_active: bool | None = None
+    is_global: bool | None = None
     metadata: dict[str, Any] | None = None
     is_onboarding: bool | None = None
 
@@ -213,6 +215,7 @@ class JourneyAdminRead(BaseModel):
     thumbnail_url: str | None = None
     category: str | None = None
     is_active: bool
+    is_global: bool = False
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

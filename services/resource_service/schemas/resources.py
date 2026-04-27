@@ -35,6 +35,7 @@ class ResourceCreate(BaseModel):
     unlock_logic: str = Field(default="AND", pattern="^(AND|OR)$")
     metadata: dict = Field(default_factory=dict)
     unlock_conditions: list[UnlockConditionCreate] = Field(default_factory=list)
+    is_global: bool = False
 
 
 class ResourceUpdate(BaseModel):
@@ -47,6 +48,7 @@ class ResourceUpdate(BaseModel):
     unlock_logic: str | None = Field(None, pattern="^(AND|OR)$")
     metadata: dict | None = None
     unlock_conditions: list[UnlockConditionCreate] | None = None
+    is_global: bool | None = None
 
 
 class ResourceAdminRead(BaseModel):
@@ -59,6 +61,7 @@ class ResourceAdminRead(BaseModel):
     storage_path: str | None = None
     thumbnail_url: str | None = None
     is_published: bool
+    is_global: bool = False
     points_on_completion: int
     unlock_logic: str
     metadata: dict = Field(default_factory=dict)
