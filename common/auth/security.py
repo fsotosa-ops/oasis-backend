@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -23,43 +24,71 @@ security_scheme = HTTPBearer()
 _jwks_keys: dict | None = None
 _jwks_fetched_at: float = 0
 _JWKS_REFRESH_INTERVAL = 3600  # 1 hour
+_jwks_lock: asyncio.Lock | None = None
 
 
-def _fetch_jwks() -> dict:
-    """Fetch JWKS from Supabase GoTrue (synchronous HTTP — called rarely)."""
-    import httpx
+def _get_jwks_lock() -> asyncio.Lock:
+    """Lazy-init lock (must be created inside a running event loop)."""
+    global _jwks_lock
+    if _jwks_lock is None:
+        _jwks_lock = asyncio.Lock()
+    return _jwks_lock
 
+
+def _get_jwks_url() -> str:
+    """Resolve JWKS URL from env vars."""
     jwks_url = os.getenv("SUPABASE_JWKS_URL")
     if not jwks_url:
-        # Derive from SUPABASE_URL if JWKS URL not set explicitly
         supabase_url = os.getenv("SUPABASE_URL", "")
         jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-
-    resp = httpx.get(jwks_url, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+    return jwks_url
 
 
-def _get_jwks() -> dict:
-    """Return cached JWKS, refreshing if stale (> 1h)."""
+async def _fetch_jwks_async() -> dict:
+    """Fetch JWKS from Supabase GoTrue using async HTTP (non-blocking)."""
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(_get_jwks_url(), timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _get_jwks() -> dict:
+    """Return cached JWKS, refreshing asynchronously if stale (> 1h)."""
     global _jwks_keys, _jwks_fetched_at
 
     now = time.time()
     if _jwks_keys and (now - _jwks_fetched_at) < _JWKS_REFRESH_INTERVAL:
         return _jwks_keys
 
-    try:
-        _jwks_keys = _fetch_jwks()
-        _jwks_fetched_at = now
-        logger.info("JWKS refreshed successfully")
-    except Exception:
-        if _jwks_keys:
-            logger.warning("JWKS refresh failed — using stale keys", exc_info=True)
-        else:
-            logger.error("JWKS fetch failed and no cached keys available", exc_info=True)
-            raise
+    async with _get_jwks_lock():
+        # Double-check after acquiring lock (another coroutine may have refreshed)
+        now = time.time()
+        if _jwks_keys and (now - _jwks_fetched_at) < _JWKS_REFRESH_INTERVAL:
+            return _jwks_keys
+
+        try:
+            _jwks_keys = await _fetch_jwks_async()
+            _jwks_fetched_at = now
+            logger.info("JWKS refreshed successfully")
+        except Exception:
+            if _jwks_keys:
+                logger.warning("JWKS refresh failed — using stale keys", exc_info=True)
+            else:
+                logger.error("JWKS fetch failed and no cached keys available", exc_info=True)
+                raise
 
     return _jwks_keys
+
+
+async def prefetch_jwks() -> None:
+    """Pre-fetch JWKS at startup so first requests don't block. Called from lifespan."""
+    try:
+        await _get_jwks()
+        logger.info("JWKS pre-fetched at startup")
+    except Exception:
+        logger.warning("JWKS pre-fetch failed — will retry on first request", exc_info=True)
 
 
 class _JWTUser:
@@ -75,14 +104,14 @@ class _JWTUser:
         self._claims = claims
 
 
-def _decode_jwt_local(token: str) -> _JWTUser:
+async def _decode_jwt_local(token: str) -> _JWTUser:
     """Validate and decode a Supabase JWT locally using JWKS.
 
     Verifies signature, expiration, and issuer.
     """
     from jose import JWTError, jwt
 
-    jwks = _get_jwks()
+    jwks = await _get_jwks()
     supabase_url = os.getenv("SUPABASE_URL", "")
     expected_issuer = f"{supabase_url}/auth/v1"
 
@@ -116,7 +145,7 @@ async def get_current_token(
 async def get_current_user(token: str = Depends(get_current_token)):
     """Validate JWT locally via JWKS. Falls back to GoTrue on failure."""
     try:
-        return _decode_jwt_local(token)
+        return await _decode_jwt_local(token)
     except Exception:
         logger.debug("Local JWT validation failed — falling back to GoTrue")
 
@@ -236,6 +265,24 @@ class OrgRoleRequired:
                     status=m["status"],
                 )
         raise ForbiddenError("No eres miembro de esta organizacion")
+
+
+# ---------------------------------------------------------------------------
+# Token verification without FastAPI Depends (e.g. WebSocket query param)
+# ---------------------------------------------------------------------------
+async def verify_token(token: str) -> _JWTUser:
+    """Validate a raw JWT string — JWKS-first, GoTrue fallback."""
+    try:
+        return await _decode_jwt_local(token)
+    except Exception:
+        pass
+    from common.database.client import get_public_client
+
+    client = await get_public_client()
+    user_response = await client.auth.get_user(token)
+    if not user_response.user:
+        raise UnauthorizedError("Token inválido o expirado")
+    return user_response.user
 
 
 # ---------------------------------------------------------------------------

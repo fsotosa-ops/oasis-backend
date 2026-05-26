@@ -687,7 +687,11 @@ async def publish_journey(db: AsyncClient, journey_id: UUID) -> dict:
         .eq("id", str(journey_id))
         .execute()
     )
-    return response.data[0] if response.data else {}
+    result = response.data[0] if response.data else {}
+    cache_delete(f"journey:{journey_id}")
+    if result.get("organization_id"):
+        cache_delete(f"org_journeys:{result['organization_id']}")
+    return result
 
 
 async def archive_journey(db: AsyncClient, journey_id: UUID) -> dict:
@@ -697,7 +701,11 @@ async def archive_journey(db: AsyncClient, journey_id: UUID) -> dict:
         .eq("id", str(journey_id))
         .execute()
     )
-    return response.data[0] if response.data else {}
+    result = response.data[0] if response.data else {}
+    cache_delete(f"journey:{journey_id}")
+    if result.get("organization_id"):
+        cache_delete(f"org_journeys:{result['organization_id']}")
+    return result
 
 
 async def list_journey_enrollees(

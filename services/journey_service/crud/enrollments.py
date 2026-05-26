@@ -263,17 +263,77 @@ async def update_enrollment_status(
 
 
 async def delete_enrollment(db: AsyncClient, enrollment_id: UUID) -> None:
-    """Delete step completions and then the enrollment itself."""
+    """Delete an enrollment and all associated gamification data:
+    step_completions, points_ledger, user_activities, and user_rewards.
+    """
+    # 1. Get enrollment info before deleting
+    enrollment = await get_enrollment_by_id(db, enrollment_id)
+    if not enrollment:
+        return
+
+    user_id = enrollment["user_id"]
+    journey_id = enrollment["journey_id"]
+    eid = str(enrollment_id)
+
+    # 2. Collect step_completion IDs (needed to clean points_ledger)
+    completions_resp = (
+        await db.schema("journeys").table("step_completions")
+        .select("id")
+        .eq("enrollment_id", eid)
+        .execute()
+    )
+    completion_ids = [c["id"] for c in (completions_resp.data or [])]
+
+    # 3. Delete points_ledger entries linked to these step completions
+    if completion_ids:
+        await (
+            db.schema("journeys").table("points_ledger")
+            .delete()
+            .in_("reference_id", completion_ids)
+            .execute()
+        )
+        logger.info(
+            "delete_enrollment: removed %d points_ledger entries for enrollment=%s",
+            len(completion_ids), eid,
+        )
+
+    # 4. Delete user_activities for this enrollment
+    #    (step_completed and journey_completed both store enrollment_id in metadata)
+    await (
+        db.schema("journeys").table("user_activities")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("metadata->>enrollment_id", eid)
+        .execute()
+    )
+    logger.info("delete_enrollment: removed user_activities for enrollment=%s", eid)
+
+    # 5. Delete user_rewards earned from this journey
+    await (
+        db.schema("journeys").table("user_rewards")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("journey_id", journey_id)
+        .execute()
+    )
+    logger.info(
+        "delete_enrollment: removed user_rewards for user=%s journey=%s",
+        user_id, journey_id,
+    )
+
+    # 6. Delete step_completions
     await (
         db.schema("journeys").table("step_completions")
         .delete()
-        .eq("enrollment_id", str(enrollment_id))
+        .eq("enrollment_id", eid)
         .execute()
     )
+
+    # 7. Delete the enrollment itself
     await (
         db.schema("journeys").table("enrollments")
         .delete()
-        .eq("id", str(enrollment_id))
+        .eq("id", eid)
         .execute()
     )
 

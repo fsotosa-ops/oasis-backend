@@ -17,6 +17,7 @@ from services.auth_service.schemas.events import (
     AttendanceResponse,
     AttendanceUpdate,
     EventCreate,
+    EventDashboardSummary,
     EventJourneyAdd,
     EventJourneyResponse,
     EventResponse,
@@ -151,6 +152,19 @@ async def join_event(
         attendance_registered=attendance_registered,
         journey_enrolled=journey_enrolled,
     )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Summary
+# ---------------------------------------------------------------------------
+
+@router.get("/dashboard-summary", response_model=EventDashboardSummary)
+async def get_dashboard_summary(
+    db: AsyncClient = Depends(get_admin_client),
+    org: OrgContext = Depends(OrgRoleRequired("owner", "admin")),
+):
+    """Métricas agregadas de eventos live/upcoming para el dashboard admin."""
+    return await EventManager.get_dashboard_summary(db, org.organization_id)
 
 
 # ---------------------------------------------------------------------------

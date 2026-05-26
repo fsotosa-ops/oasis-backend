@@ -20,6 +20,7 @@ email-validator = "^2.3.0"
 slowapi = "^0.1.9"  # Rate limiting
 python-dotenv = "^1.2.1"
 upstash-redis = "^1.1.0"  # Serverless Redis cache (HTTP-based)
+redis = ">=4.2.0"          # Native Redis client for pub/sub subscriber
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"

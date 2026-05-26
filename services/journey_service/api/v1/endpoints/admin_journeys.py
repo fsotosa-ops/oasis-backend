@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 
 from common.auth.security import AdminUser, OrgRoleRequired, get_current_user
+from common.events import EventType, RealtimeEvent, publish_event
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.gamification_service.crud import config as gamif_config_crud
@@ -222,6 +223,11 @@ async def publish_journey(
 ):
     await crud.publish_journey(db, journey_id)
     journey = await crud.get_journey_admin(db, journey_id)
+    await publish_event(RealtimeEvent(
+        type=EventType.JOURNEY_PUBLISHED,
+        payload={"journey_id": str(journey_id)},
+        org_id=org_id,
+    ))
     return journey
 
 
@@ -238,4 +244,9 @@ async def archive_journey(
 ):
     await crud.archive_journey(db, journey_id)
     journey = await crud.get_journey_admin(db, journey_id)
+    await publish_event(RealtimeEvent(
+        type=EventType.JOURNEY_ARCHIVED,
+        payload={"journey_id": str(journey_id)},
+        org_id=org_id,
+    ))
     return journey

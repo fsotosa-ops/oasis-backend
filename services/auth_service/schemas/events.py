@@ -179,3 +179,28 @@ class AttendanceResponse(BaseModel):
     # Populated via join with profiles
     user_email: Optional[str] = None
     user_full_name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Summary
+# ---------------------------------------------------------------------------
+
+class EventDashboardSummaryItem(BaseModel):
+    id: str
+    name: str
+    slug: str
+    status: EventStatus
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    location: Optional[str] = None
+    expected_participants: Optional[int] = None
+    registered_count: int = 0
+    attended_count: int = 0
+    no_show_count: int = 0
+    modality_breakdown: dict[str, int] = {}
+
+
+class EventDashboardSummary(BaseModel):
+    live_events: List[EventDashboardSummaryItem] = []
+    upcoming_events: List[EventDashboardSummaryItem] = []
+    totals: dict[str, int] = {}

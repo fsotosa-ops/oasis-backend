@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +10,10 @@ from slowapi.errors import RateLimitExceeded
 from supabase_auth.errors import AuthApiError
 from postgrest.exceptions import APIError as PostgRESTAPIError
 
+from common.auth.security import prefetch_jwks
 from common.cache.redis_client import cache_ping
+from common.events.router import router as events_router
+from common.events.subscriber import start_subscriber
 from common.exceptions import (
     OasisException,
     auth_api_error_handler,
@@ -28,10 +33,27 @@ logger = logging.getLogger("oasis.gateway")
 
 from common.rate_limit import limiter
 
+
+# ---------------------------------------------------------------------------
+# Lifespan: startup / shutdown tasks
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await prefetch_jwks()
+    subscriber_task = asyncio.create_task(start_subscriber())
+    logger.info("Startup complete")
+    yield
+    subscriber_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await subscriber_task
+    logger.info("Shutdown complete")
+
+
 app = FastAPI(
     title="OASIS Platform API",
     version="1.0.0",
     description="Gateway principal de la plataforma OASIS Multi-Tenant",
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter
@@ -82,6 +104,7 @@ app.include_router(analytics_router, prefix="/api/v1/analytics")
 app.include_router(gamification_router, prefix="/api/v1/gamification", tags=["Gamification"])
 app.include_router(resource_router, prefix="/api/v1/resources", tags=["Resources"])
 app.include_router(crm_router, prefix="/api/v1/crm", tags=["CRM"])
+app.include_router(events_router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------
