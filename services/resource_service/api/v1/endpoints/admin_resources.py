@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, UploadFile, File, status
 
 from common.auth.security import OrgRoleRequired
 from common.database.client import get_admin_client
+from common.events import EventType, RealtimeEvent, publish_event
 from common.exceptions import NotFoundError
 from services.resource_service.crud import resources as crud
 from services.resource_service.schemas.resources import (
@@ -122,6 +123,11 @@ async def publish_resource(
     resource = await crud.publish_resource(db, resource_id)
     if not resource:
         raise NotFoundError("Recurso")
+    await publish_event(RealtimeEvent(
+        type=EventType.RESOURCE_PUBLISHED,
+        payload={"resource_id": str(resource_id)},
+        org_id=org_id,
+    ))
     return resource
 
 
@@ -139,6 +145,11 @@ async def unpublish_resource(
     resource = await crud.unpublish_resource(db, resource_id)
     if not resource:
         raise NotFoundError("Recurso")
+    await publish_event(RealtimeEvent(
+        type=EventType.RESOURCE_UNPUBLISHED,
+        payload={"resource_id": str(resource_id)},
+        org_id=org_id,
+    ))
     return resource
 
 

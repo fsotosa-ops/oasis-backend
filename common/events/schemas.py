@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 class EventType(str, Enum):
     JOURNEY_ARCHIVED = "journey.archived"
     JOURNEY_PUBLISHED = "journey.published"
+    RESOURCE_PUBLISHED = "resource.published"
+    RESOURCE_UNPUBLISHED = "resource.unpublished"
 
 
 class RealtimeEvent(BaseModel):
