@@ -10,13 +10,20 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 # 1. Cliente Publico (Singleton) — usa anon key
+# flow_type="implicit" desactiva PKCE en el lado del servidor: el code_verifier
+# se genera en memoria del cliente y se pierde entre instancias de Cloud Run.
+# PKCE es para clientes públicos (browser/mobile); el servidor no lo necesita.
 _public_client: AsyncClient | None = None
 
 
 async def get_public_client() -> AsyncClient:
     global _public_client
     if not _public_client:
-        _public_client = await acreate_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _public_client = await acreate_client(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY,
+            options=ClientOptions(flow_type="implicit"),
+        )
     return _public_client
 
 
