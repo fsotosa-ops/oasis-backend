@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from services.auth_service.api.v1.endpoints import auth, events, organizations, users
+from services.auth_service.api.v1.endpoints import auth, events, organizations, settings, users
 
 api_router = APIRouter()
 public_router = APIRouter()
@@ -10,3 +10,4 @@ api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["Organizations"])
 api_router.include_router(events.router, prefix="/organizations/{org_id}/events", tags=["Events"])
 api_router.include_router(events.event_gateway_router, prefix="/events", tags=["Events"])
+api_router.include_router(settings.router, prefix="/settings", tags=["Settings"])
