@@ -1,22 +1,23 @@
 -- =============================================================================
 -- MIGRATION: platform_settings — singleton table for platform-wide configuration
 -- =============================================================================
--- Stores platform-level settings editable by superadmins from the UI.
+-- Single JSONB `settings` column keeps the schema stable as new config keys
+-- are added over time. The shape is enforced at the application layer
+-- (Pydantic on the backend, TypeScript interfaces on the frontend).
 -- Uses a boolean PK trick (lock = TRUE) to enforce exactly one row.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.platform_settings (
     -- Singleton enforcer: only one row where lock = TRUE can exist
-    lock                  BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    CONSTRAINT            platform_settings_one_row CHECK (lock = TRUE),
+    lock        BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    CONSTRAINT  platform_settings_one_row CHECK (lock = TRUE),
 
-    -- Event Typeform URLs (standard for all events across all orgs)
-    diagnosis_form_url    TEXT,
-    closure_form_url      TEXT,
+    -- All platform-wide config lives here; shape is owned by the app layer
+    settings    JSONB NOT NULL DEFAULT '{}',
 
     -- Audit
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by            UUID REFERENCES public.profiles(id) ON DELETE SET NULL
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by  UUID REFERENCES public.profiles(id) ON DELETE SET NULL
 );
 
 -- Auto-update updated_at on any change
@@ -41,13 +42,18 @@ CREATE POLICY "platform_settings_admin_write" ON public.platform_settings
     WITH CHECK (public.get_is_platform_admin() = TRUE);
 
 -- Grants
-GRANT SELECT         ON public.platform_settings TO authenticated;
-GRANT UPDATE         ON public.platform_settings TO authenticated;
-GRANT ALL            ON public.platform_settings TO service_role;
+GRANT SELECT ON public.platform_settings TO authenticated;
+GRANT UPDATE ON public.platform_settings TO authenticated;
+GRANT ALL    ON public.platform_settings TO service_role;
 
--- Seed the single row (empty URLs — superadmin configures from the UI)
-INSERT INTO public.platform_settings (lock, diagnosis_form_url, closure_form_url)
-VALUES (TRUE, NULL, NULL)
+-- Seed the single row with empty defaults
+INSERT INTO public.platform_settings (lock, settings)
+VALUES (TRUE, '{
+    "event_forms": {
+        "diagnosis_form_url": null,
+        "closure_form_url": null
+    }
+}'::jsonb)
 ON CONFLICT (lock) DO NOTHING;
 
 -- =============================================================================
