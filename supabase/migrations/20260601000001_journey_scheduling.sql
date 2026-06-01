@@ -7,3 +7,7 @@ ALTER TABLE journeys.steps
 -- Add scheduling to journeys for controlling when a journey opens for enrollment
 ALTER TABLE journeys.journeys
   ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ DEFAULT NULL;
+
+-- Timezone for the journey (used by the UI to display/convert scheduling times)
+ALTER TABLE journeys.journeys
+  ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'America/Santiago';

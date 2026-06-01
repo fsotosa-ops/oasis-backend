@@ -203,6 +203,7 @@ class JourneyCreate(BaseModel):
     is_global: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     available_from: datetime | None = None
+    timezone: str = 'America/Santiago'
 
 
 class JourneyUpdate(BaseModel):
@@ -218,6 +219,7 @@ class JourneyUpdate(BaseModel):
     metadata: dict[str, Any] | None = None
     is_onboarding: bool | None = None
     available_from: datetime | None = None
+    timezone: str | None = None
 
 
 class JourneyAdminRead(BaseModel):
@@ -231,6 +233,7 @@ class JourneyAdminRead(BaseModel):
     is_active: bool
     is_global: bool = False
     available_from: datetime | None = None
+    timezone: str = 'America/Santiago'
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
