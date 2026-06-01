@@ -1,12 +1,64 @@
 import logging
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from common.cache.redis_client import cache_get_json, cache_set_json
 from supabase import AsyncClient
 
 logger = logging.getLogger("oasis.enrollment.crud")
+
+
+def _parse_dt(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _compute_step_availability(
+    step: dict,
+    idx: int,
+    current_step_index: int,
+    now: datetime,
+    enrollment_started_at: str | datetime | None,
+    prev_completed_at: str | datetime | None,
+) -> tuple[str, datetime | None]:
+    """Compute (status, available_at) for a step given current context.
+
+    available_at is set when the step is locked due to scheduling so the UI
+    can show 'Available on [date]'.
+    """
+    # Absolute date gate
+    af = _parse_dt(step.get("available_from"))
+    if af is not None and now < af:
+        return "locked", af
+
+    # Hours after enrollment/event start
+    hours_start = step.get("unlock_hours_after_start")
+    if hours_start:
+        started = _parse_dt(enrollment_started_at)
+        if started:
+            unlock = started + timedelta(hours=hours_start)
+            if now < unlock:
+                return "locked", unlock
+
+    # Hours after previous step completion
+    hours_prev = step.get("unlock_hours_after_previous")
+    if hours_prev and idx > 0:
+        prev = _parse_dt(prev_completed_at)
+        if prev:
+            unlock = prev + timedelta(hours=hours_prev)
+            if now < unlock:
+                return "locked", unlock
+
+    # Normal linear availability
+    status = "available" if idx <= current_step_index else "locked"
+    return status, None
 
 
 async def get_active_enrollment(
@@ -103,7 +155,7 @@ async def get_enrollment_with_progress(
 
     steps_response = (
         await db.schema("journeys").table("steps")
-        .select("id, title, type, order_index")
+        .select("id, title, type, order_index, available_from, unlock_hours_after_start, unlock_hours_after_previous")
         .eq("journey_id", journey_id)
         .order("order_index")
         .execute()
@@ -121,6 +173,9 @@ async def get_enrollment_with_progress(
     steps_progress = []
     completed_count = 0
     current_step_index = enrollment.get("current_step_index", 0)
+    now = datetime.now(UTC)
+    enrollment_started_at = enrollment.get("started_at")
+    prev_completed_at: str | None = None
 
     for idx, step in enumerate(all_steps):
         step_id = step["id"]
@@ -128,11 +183,13 @@ async def get_enrollment_with_progress(
 
         if completion:
             step_status = "completed"
+            available_at = None
             completed_count += 1
-        elif idx <= current_step_index:
-            step_status = "available"
+            prev_completed_at = completion.get("completed_at")
         else:
-            step_status = "locked"
+            step_status, available_at = _compute_step_availability(
+                step, idx, current_step_index, now, enrollment_started_at, prev_completed_at
+            )
 
         steps_progress.append(
             {
@@ -143,6 +200,7 @@ async def get_enrollment_with_progress(
                 "status": step_status,
                 "completed_at": completion["completed_at"] if completion else None,
                 "points_earned": completion["points_earned"] if completion else 0,
+                "available_at": available_at.isoformat() if available_at else None,
             }
         )
 
@@ -169,7 +227,7 @@ async def get_enrollment_step_progress(
 
     steps_response = (
         await db.schema("journeys").table("steps")
-        .select("id, title, type, order_index")
+        .select("id, title, type, order_index, available_from, unlock_hours_after_start, unlock_hours_after_previous")
         .eq("journey_id", journey_id)
         .order("order_index")
         .execute()
@@ -185,6 +243,9 @@ async def get_enrollment_step_progress(
     completions = {c["step_id"]: c for c in (completions_response.data or [])}
 
     current_index = enrollment.get("current_step_index", 0)
+    now = datetime.now(UTC)
+    enrollment_started_at = enrollment.get("started_at")
+    prev_completed_at: str | None = None
     progress = []
 
     for idx, step in enumerate(all_steps):
@@ -193,10 +254,12 @@ async def get_enrollment_step_progress(
 
         if completion:
             step_status = "completed"
-        elif idx <= current_index:
-            step_status = "available"
+            available_at = None
+            prev_completed_at = completion.get("completed_at")
         else:
-            step_status = "locked"
+            step_status, available_at = _compute_step_availability(
+                step, idx, current_index, now, enrollment_started_at, prev_completed_at
+            )
 
         progress.append(
             {
@@ -207,6 +270,7 @@ async def get_enrollment_step_progress(
                 "status": step_status,
                 "completed_at": completion["completed_at"] if completion else None,
                 "points_earned": completion["points_earned"] if completion else 0,
+                "available_at": available_at.isoformat() if available_at else None,
             }
         )
 
@@ -341,7 +405,7 @@ async def delete_enrollment(db: AsyncClient, enrollment_id: UUID) -> None:
 async def get_step_by_id(db: AsyncClient, step_id: UUID) -> dict | None:
     response = (
         await db.schema("journeys").table("steps")
-        .select("id, type, config, gamification_rules")
+        .select("id, type, config, gamification_rules, available_from, unlock_hours_after_start, unlock_hours_after_previous")
         .eq("id", str(step_id))
         .single()
         .execute()
@@ -546,15 +610,21 @@ async def get_user_enrollments_full(
 
         steps_progress = []
         completed_count = 0
+        now = datetime.now(UTC)
+        enrollment_started_at = e.get("started_at")
+        prev_completed_at_full: str | None = None
+
         for idx, step in enumerate(steps):
             completion = completions.get(step["id"])
             if completion:
                 step_status = "completed"
+                available_at = None
                 completed_count += 1
-            elif idx <= current_index:
-                step_status = "available"
+                prev_completed_at_full = completion.get("completed_at")
             else:
-                step_status = "locked"
+                step_status, available_at = _compute_step_availability(
+                    step, idx, current_index, now, enrollment_started_at, prev_completed_at_full
+                )
 
             steps_progress.append({
                 "step_id": step["id"],
@@ -564,6 +634,7 @@ async def get_user_enrollments_full(
                 "status": step_status,
                 "completed_at": completion["completed_at"] if completion else None,
                 "points_earned": completion["points_earned"] if completion else 0,
+                "available_at": available_at.isoformat() if available_at else None,
             })
 
         result.append({

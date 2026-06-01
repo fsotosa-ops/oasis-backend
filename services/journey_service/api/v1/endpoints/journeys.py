@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -27,13 +28,26 @@ async def list_journeys(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ):
-    journeys, _ = await crud.get_journeys_for_org(
+    all_journeys, _ = await crud.get_journeys_for_org(
         db=db,
         org_id=org_id,
         is_active=is_active,
         skip=skip,
         limit=limit,
     )
+    # Filter by available_from: hide journeys not yet open for enrollment
+    now = datetime.now(timezone.utc)
+    journeys = []
+    for j in all_journeys:
+        af = j.get("available_from")
+        if af:
+            try:
+                af_dt = datetime.fromisoformat(af.replace("Z", "+00:00")) if isinstance(af, str) else af
+                if now < af_dt:
+                    continue
+            except (ValueError, AttributeError):
+                pass
+        journeys.append(j)
     return journeys
 
 

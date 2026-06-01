@@ -108,6 +108,9 @@ class StepBase(BaseModel):
     type: StepType
     gamification_rules: GamificationRules = Field(default_factory=GamificationRules)
     config: dict[str, Any] = Field(default_factory=dict)
+    available_from: datetime | None = None
+    unlock_hours_after_start: int | None = None
+    unlock_hours_after_previous: int | None = None
 
 
 class StepRead(StepBase):
@@ -125,6 +128,9 @@ class StepCreate(BaseModel):
     order_index: int | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     gamification_rules: GamificationRules = Field(default_factory=GamificationRules)
+    available_from: datetime | None = None
+    unlock_hours_after_start: int | None = None
+    unlock_hours_after_previous: int | None = None
 
 
 class StepUpdate(BaseModel):
@@ -132,6 +138,9 @@ class StepUpdate(BaseModel):
     type: StepType | None = None
     config: dict[str, Any] | None = None
     gamification_rules: GamificationRules | None = None
+    available_from: datetime | None = None
+    unlock_hours_after_start: int | None = None
+    unlock_hours_after_previous: int | None = None
 
 
 class StepAdminRead(BaseModel):
@@ -142,6 +151,9 @@ class StepAdminRead(BaseModel):
     order_index: int
     config: dict = Field(default_factory=dict)
     gamification_rules: GamificationRules = Field(default_factory=GamificationRules)
+    available_from: datetime | None = None
+    unlock_hours_after_start: int | None = None
+    unlock_hours_after_previous: int | None = None
     created_at: datetime
     updated_at: datetime
     total_completions: int = 0
@@ -190,6 +202,7 @@ class JourneyCreate(BaseModel):
     is_active: bool = False
     is_global: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+    available_from: datetime | None = None
 
 
 class JourneyUpdate(BaseModel):
@@ -204,6 +217,7 @@ class JourneyUpdate(BaseModel):
     is_global: bool | None = None
     metadata: dict[str, Any] | None = None
     is_onboarding: bool | None = None
+    available_from: datetime | None = None
 
 
 class JourneyAdminRead(BaseModel):
@@ -216,6 +230,7 @@ class JourneyAdminRead(BaseModel):
     category: str | None = None
     is_active: bool
     is_global: bool = False
+    available_from: datetime | None = None
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

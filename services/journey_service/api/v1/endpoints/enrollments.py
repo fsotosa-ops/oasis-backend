@@ -236,6 +236,25 @@ async def complete_step(
     if already:
         raise ConflictError("Este step ya fue completado.")
 
+    # Date-gate validation
+    step_data = await crud.get_step_by_id(db, step_id)
+    if step_data:
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        started_str = enrollment.get("started_at")
+
+        af = step_data.get("available_from")
+        if af:
+            af_dt = datetime.fromisoformat(af.replace("Z", "+00:00")) if isinstance(af, str) else af
+            if now < af_dt:
+                raise ConflictError("Este step aún no está disponible.")
+
+        hours_start = step_data.get("unlock_hours_after_start")
+        if hours_start and started_str:
+            started = datetime.fromisoformat(started_str.replace("Z", "+00:00")) if isinstance(started_str, str) else started_str
+            if now < started + timedelta(hours=hours_start):
+                raise ConflictError("Este step aún no está disponible.")
+
     metadata = body.metadata if body else None
     external_reference = body.external_reference if body else None
     service_data = body.service_data if body else None

@@ -34,6 +34,7 @@ class StepProgressRead(BaseModel):
     status: Literal["locked", "available", "completed"]
     completed_at: datetime | None = None
     points_earned: int = 0
+    available_at: datetime | None = None
 
 
 class JourneyBasicInfo(BaseModel):
