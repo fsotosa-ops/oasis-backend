@@ -29,12 +29,17 @@ async def onboarding_check(
     org_id: str | None = Query(None, description="Target org; defaults to first active membership"),
 ):
     """
-    Returns whether the participant should see the onboarding journey gate.
-    - No gamification_config.profile_completion_journey_id configured → should_show: false
-    - User has a completed enrollment for that journey → should_show: false
-    - No enrollment or enrollment.status = 'active' → should_show: true
-    Only meaningful for Participant role; Admin/SuperAdmin always get should_show: false
-    via the frontend guard.
+    Returns the next onboarding journey the participant should complete, or
+    should_show: false when none is pending.
+
+    Selection logic (delegated to journeys.get_next_onboarding_journey):
+    - Only active journeys flagged metadata.is_onboarding = true are considered
+    - Journeys already completed by this user (per-enrollment) are excluded
+    - Ordered by onboarding_priority ASC NULLS LAST, then created_at ASC
+    - Journeys with onboarding_trigger_journey_id are only shown after that
+      prerequisite journey is completed (enables contextual mid-flow onboarding)
+
+    Admin/SuperAdmin always get should_show: false (frontend guard handles roles).
     """
     user_id = str(current_user.id)
 
@@ -42,49 +47,26 @@ async def onboarding_check(
     if not active:
         return OnboardingCheckResponse(should_show=False)
 
-    # Use provided org_id if valid (user must be a member), else first active
+    # Resolve org: use provided org_id if the user is a member, else first active
     if org_id:
         matching = [m for m in active if m["organization_id"] == org_id]
-        if matching:
-            org_id = matching[0]["organization_id"]
-        else:
-            org_id = active[0]["organization_id"]
+        org_id = matching[0]["organization_id"] if matching else active[0]["organization_id"]
     else:
         org_id = active[0]["organization_id"]
 
     try:
-        # Fetch gamification config to get profile_completion_journey_id
-        config_resp = (
-            await db.schema("journeys")
-            .table("gamification_config")
-            .select("profile_completion_journey_id")
-            .eq("organization_id", org_id)
-            .execute()
-        )
-        configs = config_resp.data if config_resp else []
-        config = configs[0] if configs else None
-        if not config or not config.get("profile_completion_journey_id"):
+        result = await db.rpc(
+            "get_next_onboarding_journey",
+            {"p_user_id": user_id, "p_org_id": org_id},
+        ).execute()
+
+        journey_id = result.data  # UUID string or None
+
+        if not journey_id:
             return OnboardingCheckResponse(should_show=False)
 
-        journey_id = str(config["profile_completion_journey_id"])
+        return OnboardingCheckResponse(should_show=True, journey_id=str(journey_id))
 
-        # Check if user has a completed enrollment for this journey
-        enrollment_resp = (
-            await db.schema("journeys")
-            .table("enrollments")
-            .select("status")
-            .eq("user_id", user_id)
-            .eq("journey_id", journey_id)
-            .execute()
-        )
-        enrollments = enrollment_resp.data if enrollment_resp else []
-        enrollment = enrollments[0] if enrollments else None
-
-        if enrollment and enrollment.get("status") == "completed":
-            return OnboardingCheckResponse(should_show=False)
-
-        # No enrollment or active enrollment → show onboarding
-        return OnboardingCheckResponse(should_show=True, journey_id=journey_id)
     except Exception:
         logger.exception(
             "onboarding-check failed for user=%s org=%s", user_id, org_id,

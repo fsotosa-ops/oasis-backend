@@ -220,6 +220,8 @@ class JourneyUpdate(BaseModel):
     is_onboarding: bool | None = None
     available_from: datetime | None = None
     timezone: str | None = None
+    onboarding_priority: int | None = None
+    onboarding_trigger_journey_id: UUID4 | None = None
 
 
 class JourneyAdminRead(BaseModel):
@@ -242,6 +244,8 @@ class JourneyAdminRead(BaseModel):
     active_enrollments: int = 0
     completed_enrollments: int = 0
     completion_rate: float = 0.0
+    onboarding_priority: int | None = None
+    onboarding_trigger_journey_id: UUID4 | None = None
 
     class Config:
         from_attributes = True

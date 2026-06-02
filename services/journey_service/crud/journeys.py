@@ -219,7 +219,11 @@ async def update_journey(
     journey: JourneyUpdate,
 ) -> dict:
     payload = journey.model_dump(exclude_unset=True)
-    payload.pop("is_onboarding", None)
+    payload.pop("is_onboarding", None)  # handled separately in admin_journeys endpoint
+
+    # Serialize UUID fields to string for PostgREST
+    if "onboarding_trigger_journey_id" in payload and payload["onboarding_trigger_journey_id"] is not None:
+        payload["onboarding_trigger_journey_id"] = str(payload["onboarding_trigger_journey_id"])
 
     if not payload:
         response = (
