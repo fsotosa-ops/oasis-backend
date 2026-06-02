@@ -33,10 +33,12 @@ def _compute_step_availability(
     available_at is set when the step is locked due to scheduling so the UI
     can show 'Available on [date]'.
     """
-    # Absolute date gate
+    # Absolute date gate — bypasses linear ordering when the time arrives
     af = _parse_dt(step.get("available_from"))
-    if af is not None and now < af:
-        return "locked", af
+    if af is not None:
+        if now < af:
+            return "locked", af
+        return "available", None
 
     # Hours after enrollment/event start
     hours_start = step.get("unlock_hours_after_start")
@@ -46,6 +48,7 @@ def _compute_step_availability(
             unlock = started + timedelta(hours=hours_start)
             if now < unlock:
                 return "locked", unlock
+            return "available", None
 
     # Hours after previous step completion
     hours_prev = step.get("unlock_hours_after_previous")
@@ -55,8 +58,9 @@ def _compute_step_availability(
             unlock = prev + timedelta(hours=hours_prev)
             if now < unlock:
                 return "locked", unlock
+            return "available", None
 
-    # Normal linear availability
+    # Normal linear availability (no scheduling constraints)
     status = "available" if idx <= current_step_index else "locked"
     return status, None
 

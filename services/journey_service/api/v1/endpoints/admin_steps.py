@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from common.auth.security import AdminUser, OrgRoleRequired, get_current_user
+from common.cache.redis_client import cache_delete
 from common.database.client import get_admin_client
 from common.exceptions import ForbiddenError, NotFoundError
 from services.journey_service.crud import journeys as journeys_crud
@@ -59,6 +60,7 @@ async def create_step(
     step["total_completions"] = 0
     step["average_points"] = 0.0
 
+    cache_delete(f"journey:{journey_id}")
     return step
 
 
@@ -80,6 +82,7 @@ async def update_step(
     if not updated:
         raise NotFoundError("Step")
 
+    cache_delete(f"journey:{journey_id}")
     return updated
 
 
@@ -99,6 +102,7 @@ async def delete_step(
     if not deleted:
         raise NotFoundError("Step")
 
+    cache_delete(f"journey:{journey_id}")
     return {"deleted_id": str(step_id)}
 
 
@@ -120,4 +124,5 @@ async def reorder_steps(
     ]
 
     steps = await crud.reorder_steps(db, journey_id, step_orders)
+    cache_delete(f"journey:{journey_id}")
     return steps
