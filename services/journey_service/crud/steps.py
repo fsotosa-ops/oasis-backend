@@ -35,6 +35,9 @@ async def create_step(
         "order_index": order_index,
         "config": clean_config_for_type(step.type, step.config),
         "gamification_rules": step.gamification_rules.model_dump(),
+        "available_from": step.available_from.isoformat() if step.available_from else None,
+        "unlock_hours_after_start": step.unlock_hours_after_start,
+        "unlock_hours_after_previous": step.unlock_hours_after_previous,
     }
 
     response = await db.schema("journeys").table("steps").insert(payload).execute()
@@ -56,6 +59,14 @@ async def update_step(
         payload["config"] = step.config
     if step.gamification_rules is not None:
         payload["gamification_rules"] = step.gamification_rules.model_dump()
+
+    # Scheduling fields: use model_fields_set to distinguish "not sent" from "sent as null"
+    if "available_from" in step.model_fields_set:
+        payload["available_from"] = step.available_from.isoformat() if step.available_from else None
+    if "unlock_hours_after_start" in step.model_fields_set:
+        payload["unlock_hours_after_start"] = step.unlock_hours_after_start
+    if "unlock_hours_after_previous" in step.model_fields_set:
+        payload["unlock_hours_after_previous"] = step.unlock_hours_after_previous
 
     if not payload:
         response = (
